@@ -10,6 +10,8 @@ This repository contains a sanitized version of a cetacean distribution capstone
 
 **Mentor:** Dr. Baracaldo 
 
+**Contributor:** Joshua Charfauros, Justin Lang, Peter Xiong, Samantha Su, Valerie De La Fuente, Ziqian Zhao 
+
 ## Overview 📝
 
 Researching the presence of blue and fin whales and their reliance on distinct call types for behaviors (such as foraging and reproduction) is important for monitoring ecosystem health and guiding conservation efforts in the California Current System. By analyzing their calls in relation with environmental data, we can gain insight into their behavioral patterns and habitat use across time.
@@ -26,6 +28,7 @@ Therefore, the goal of this project is to develop species distribution models fo
 3. A well documented, organized, and reproducible github repository.
 
 ## Directory Structure ✍️
+As a sanitized repository, the data section is not included in this repository. Here, we still include it as a reference to the original repository.
 
 ```
 /capstone-scripps/
