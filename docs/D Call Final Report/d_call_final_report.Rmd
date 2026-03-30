@@ -1,0 +1,581 @@
+---
+title: "D_call_final_report"
+author: "Peter Xiong"
+date: "2025-06-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Blue-whale D-calls, commonly associated with foraging behaviour, offer a window into how these large predators exploit prey patches within the Southern California Bight. Building on earlier work that emphasised modelling each call type separately to untangle behavioural ecology, this report develops a **spatiotemporal species-distribution model** for D-call acoustic presence. We merged 2009-2023 CalCOFI acoustic detections with CASE-STSE environmental grids, standardising temperature, salinity, current magnitude (speed) and direction (theta) at multiple depths, and appending geolocation (lat / lon) and seasonal indices. After exploratory visualisations to gauge zero-inflation and covariate patterns, we trained a delta-gamma mixed model (``sdmTMB``) that simultaneously handles presence/absence (logit link) and positive call intensity (log link). Spatial structure was captured with an SPDE mesh (cut-off = 10 km) while season acted as the temporal random effect. The report walks through (1) data cleaning and exploratory analysis, (2) model fitting and diagnostics, (3) predictive performance, and (4) heat-map visualisations highlighting hotspots in the most recent survey year.
+
+## Load Packages and Data
+
+```{r, message = F, warning = F}
+# Load in the libraries
+library(tidyverse)
+library(sdmTMB)
+library(ggplot2)
+library(janitor)
+library(sp)
+library(readr)
+library(ggcorrplot)
+library(Metrics)
+library(naniar)
+library(tibble)
+library(rsample)
+library(caret)
+library(purrr)
+library(tune)
+library(ggExtra)
+library(gridExtra)
+
+# Libraries for plotting
+library(sf)
+library(rnaturalearth)
+library(viridis)
+library(patchwork)
+```
+
+```{r}
+# Read in the data
+cal_data <- read.csv("D:/Desktop/PSTAT197B/scripps/capstone-scripps/data/Merged_CalCOFI/merged_std_data_05_13_25.csv")
+```
+
+## Data Cleaning
+
+```{r}
+# Removing the first two columns
+cal_data <- cal_data[, -c(1, 2)]
+
+# Changing dataset to only have present response data
+cal_data <- cal_data %>% 
+  filter(!is.na(d_scaled)) %>%
+  mutate(blue_resp = a_scaled + b_scaled + d_scaled)
+```
+
+## Exploratory Data Analysis
+
+### Response vs Predictors
+
+Before modeling, I want to explore the relationship between the response variable and predictors.
+
+First, we need to filter out all zero values:
+
+```{r}
+d_filtered <- cal_data %>% filter(d_scaled!= 0)
+```
+
+#### D calls vs. Lon&Lat
+
+```{r, message = FALSE}
+p1 <- ggplot(d_filtered, aes(x = lon, y = d_scaled)) +
+  geom_point() +
+  theme_classic()
+
+p1_marginal <- ggMarginal(p1, type = "histogram")
+
+p2 <- ggplot(d_filtered, aes(x = lat, y = d_scaled)) +
+  geom_point() +
+  theme_classic()
+
+p2_marginal <- ggMarginal(p2, type = "histogram")
+
+## Arrange them in a single row
+gridExtra::grid.arrange(p1_marginal, p2_marginal)
+```
+
+D-call counts are almost always low or zero and only occasionally spike to high values. Those spikes do not concentrate at a single latitude or longitude, so neither coordinate shows a clear linear trend with call intensity.
+
+#### D calls vs. Season
+
+```{r, message=FALSE}
+p3 <- ggplot(d_filtered, aes(x = season_decimal, y = d_scaled)) +
+  geom_point() +
+  theme_classic()
+
+ggMarginal(p3, type = "histogram")
+```
+
+From the plot, we can see that most D calls were detected in spring and summer. It means that blue whales are more active in spring and summer.
+
+#### D calls vs. Temperature
+
+```{r, message=FALSE}
+p4 <- ggplot(d_filtered, aes(x = temperature_depth_55, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Temperature at Depth 55m")+
+  theme_classic()
+
+p5 <- ggplot(d_filtered, aes(x = temperature_depth_105, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Temperature at Depth 105m")+
+  theme_classic()
+
+p6 <- ggplot(d_filtered, aes(x = temperature_depth_280, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Temperature at Depth 280m")+
+  theme_classic()
+
+## Arrange them in a single row
+gridExtra::grid.arrange(p4, p5, p6)
+```
+
+Across 55 m, 105 m, and 280 m, water temperature spans roughly 12 – 20 °C and the three depth profiles look almost identical—reflecting the strong inter-depth correlations seen in the matrix. In every panel most D-call counts stay below 5, with a heavy tail of zeros and only two or three extreme outliers (> 30) that are scattered across the full temperature range.
+
+#### D calls vs. Pressure
+
+```{r, message=FALSE}
+p7 <- ggplot(d_filtered, aes(x = pressure_depth_55, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Pressure at Depth 55m")+
+  theme_classic()
+
+p8 <- ggplot(d_filtered, aes(x = pressure_depth_105, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Pressure at Depth 105m")+
+  theme_classic()
+
+p9 <- ggplot(d_filtered, aes(x = pressure_depth_280, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Pressure at Depth 280m")+
+  theme_classic()
+
+## Arrange them in a single row
+gridExtra::grid.arrange(p7, p8, p9)
+```
+
+Across the 55 m, 105 m, and 280 m layers, the smoothed blue curves remain essentially flat, with confidence bands overlapping zero throughout the observed pressure range. Scattered points—including a few high-count outliers—occur at various pressure values without a clear pattern. The similarity of the three panels reinforces that depth-specific pressure offers little additional information for explaining D-call intensity. In short, ambient pressure shows no meaningful relationship with blue-whale D-call activity in this data set.
+
+#### D calls vs. Salinity
+
+```{r, message=FALSE}
+s1 <- ggplot(d_filtered, aes(x = salinity_depth_55, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Salinity at Depth 55m")+
+  theme_classic()
+
+s2 <- ggplot(d_filtered, aes(x = salinity_depth_105, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Salinity at Depth 105m")+
+  theme_classic()
+
+s3 <- ggplot(d_filtered, aes(x = salinity_depth_280, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Salinity at Depth 280m")+
+  theme_classic()
+
+## Arrange them in a single row
+gridExtra::grid.arrange(s1, s2, s3)
+```
+
+For salinity values ranging ≈ 33.2–33.7 PSU, the smoothed trend lines at 55 m, 105 m, and 280 m are virtually flat, with confidence bands overlapping zero along the entire axis. Most D-call counts remain below 5, and the few larger outliers appear at assorted salinities. Because all three depths yield the same, near-zero slope, salinity—like temperature and pressure—shows no discernible influence on D-call intensity in this dataset, and separate depth layers add no extra explanatory power.
+
+#### D calls vs. Magnitude
+
+```{r, message=FALSE}
+m1 <- ggplot(d_filtered, aes(x = magnitude_depth_55, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Magnitude at Depth 55m")+
+  theme_classic()
+
+m2 <- ggplot(d_filtered, aes(x = magnitude_depth_105, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Magnitude at Depth 105m")+
+  theme_classic()
+
+m3 <- ggplot(d_filtered, aes(x = magnitude_depth_280, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Magnitude at Depth 280m")+
+  theme_classic()
+
+## Arrange them in a single row
+gridExtra::grid.arrange(m1, m2, m3)
+```
+
+Current magnitude (0–0.35 m s⁻¹) shows virtually no association with D-call intensity at 55 m, 105 m, or 280 m. Smoothed lines are flat and confidence bands straddle zero throughout, while most detections remain under 5 regardless of flow speed. A few high outliers appear but do not cluster at any particular magnitude. Thus, current speed—like the other environmental variables examined—adds little explanatory power for predicting D-call counts, and additional depth layers do not change that conclusion.
+
+#### D calls vs. Theta
+
+```{r, message=FALSE}
+t1 <- ggplot(d_filtered, aes(x = theta_depth_55, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Theta at Depth 55m")+
+  theme_classic()
+
+t2 <- ggplot(d_filtered, aes(x = theta_depth_105, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Theta at Depth 105m")+
+  theme_classic()
+
+t3 <- ggplot(d_filtered, aes(x = theta_depth_280, y = d_scaled)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "D calls vs. Theta at Depth 280m")+
+  theme_classic()
+
+## Arrange them in a single row
+gridExtra::grid.arrange(t1, t2, t3)
+```
+
+The direction of flow (θ, scaled between –π and +π) shows the same story at 55 m, 105 m, and 280 m: the fitted trend is essentially flat with confidence bands that straddle zero across all directions. Most detections cluster near zero counts, and the handful of large outliers are scattered at various θ values rather than concentrated in any quadrant. Because the three depth profiles are nearly identical, current direction provides little independent information for predicting D-call intensity, confirming that directional flow is not a key driver in this dataset.
+
+### Correlation Plot
+
+```{r}
+# Plotting Correlation
+# Define expected columns
+cols_to_use <- c("est_depth", 
+                 "temperature_depth_105", "temperature_depth_280", "temperature_depth_55", 
+                 "salinity_depth_105", "salinity_depth_280", "salinity_depth_55", 
+                 "meridional_velocity_depth_105", "meridional_velocity_depth_280", "meridional_velocity_depth_55", 
+                 "zonal_velocity_depth_105", "zonal_velocity_depth_280", "zonal_velocity_depth_55", 
+                 "vertical_velocity_depth_105", "vertical_velocity_depth_280", "vertical_velocity_55", "larvae_count", "lon", "lat", "season")
+
+# Keep only existing columns
+existing_cols <- intersect(cols_to_use, colnames(cal_data))
+cor_data <- cal_data[, existing_cols, drop = FALSE]
+
+# Compute correlation matrix (use complete.obs to skip missing data)
+cor_matrix <- cor(cor_data, use = "complete.obs")
+
+# Correlation plot
+ggcorrplot(cor_matrix, 
+           lab = TRUE, 
+           hc.order = TRUE, 
+           lab_size =2,
+           tl.cex = 5,
+           type = "lower", 
+           title = "Correlation Plot")
+```
+
+The correlation matrix reveals two clear patterns. First, depth-stratified versions of the same variable (e.g., temperature at 55 m, 105 m, and 280 m) are almost perfectly correlated ( r ≈ 0.9 – 1.0 ), while correlations between different variable types (temperature vs salinity, temperature vs velocity, etc.) hover near zero. Second, the velocity components and spatial coordinates (latitude, longitude) show only weak to moderate associations with any environmental variable.
+
+For modelling, this means that including multiple depths of a highly correlated variable will add redundancy and inflates multicollinearity, potentially causing singular fits or unstable coefficients. A practical remedy is to keep just one representative depth per variable (or combine depths through PCA/regularisation), while retaining spatial terms that contribute largely independent information.
+
+### Missing Data
+
+We need to make sure that there is no missing data.
+
+```{r}
+# Count how many missing values there are
+sum(is.na(cal_data))
+
+# Visualize missing data
+missing_data_plot <- naniar::vis_miss(cal_data)
+print(missing_data_plot)
+```
+
+
+## Splitting the Data
+
+```{r}
+# Split data into training and testing sets with most recent year as our testing set
+set.seed(123)
+last_year <- max(cal_data$year)
+train_data <- cal_data %>% filter(year != last_year)
+test_data <- cal_data %>% filter(year == last_year)
+```
+
+## Prediction Plot
+
+#### Function
+
+To determine the performance of models, we want to make a prediction plot to compare the predicted whale existence with the real one. Thus, we need to write a function for plotting.
+
+```{r}
+generate_seasonal_prediction_plots <- function(fit, year, test_data, cap, resp) {
+  
+  plots <- list()
+  coast <- rnaturalearth::ne_coastline(scale = "medium", returnclass = "sf")
+  choose_folder <- function(variable, year) {
+    base_path <- "D:/Desktop/PSTAT197B/scripps/capstone-scripps/data/Specificdate"
+    if (variable == "temperature") {
+      return(file.path(base_path, "Temperature", "temperature_avg_output"))
+    }
+    if (variable == "salinity") {
+      return(file.path(base_path, "Salinity", "salinity_avg_output"))
+    }
+    if (variable == "pressure") {
+      return(file.path(base_path, "Pressure", "pressure_avg_output"))
+    }
+    if (variable == "mvel") {
+      return(file.path(base_path, "Meridional_velocity", "meridional_velocity_avg_output"))
+    }
+    if (variable == "zvel") {
+      return(file.path(base_path, "Zonal_velocity", "zonal_velocity_avg_output"))
+    }
+  }
+
+  pivot_grid <- function(df, var_name) {
+    df %>%
+      rename(lon = 1) %>%
+      pivot_longer(cols = starts_with("Lat_"), names_to = "lat", values_to = var_name) %>%
+      mutate(
+        lat = as.numeric(str_remove(lat, "Lat_")),
+        lon = as.numeric(str_remove(lon, "Lon_")) - 360,
+        !!var_name := if (!str_detect(var_name, "meridional_velocity|zonal_velocity"))
+          scale(.data[[var_name]])[, 1] else .data[[var_name]]
+      )
+  }
+
+  get_season <- function(month) {
+    case_when(
+      month %in% c(12, 1, 2) ~ 0,
+      month %in% 3:5 ~ 0.25,
+      month %in% 6:8 ~ 0.5,
+      month %in% 9:11 ~ 0.75
+    )
+  }
+
+  for (season_val in c(0, 0.25, 0.5, 0.75)) {
+    # issue in that the 12 is 12 of that year -> need to hardcode 12 of previous year 
+    season_months <- list(`0` = c(12, 1, 2), `0.25` = 3:5, `0.5` = 6:8, `0.75` = 9:11)[[as.character(season_val)]]
+    season_data <- list()
+
+    for (month in season_months) {
+      date <- sprintf("%s-%02d", year, month)
+      combined <- NULL
+      for (depth in c("-55.0", "-105.0", "-280.0")) {
+        added <- paste0("avg_depth_", depth, "_month_", date, ".csv")
+        temp_path <- file.path(choose_folder("temperature", year), paste0("temperature_", added))
+        sal_path  <- file.path(choose_folder("salinity", year), paste0("salinity_", added))
+        pres_path <- file.path(choose_folder("pressure", year), paste0("pressure_", added))
+        mvel_path <- file.path(choose_folder("mvel", year), paste0("meridional_velocity_", added))
+        zvel_path <- file.path(choose_folder("zvel", year), paste0("zonal_velocity_", added))
+
+        if (!file.exists(temp_path) || !file.exists(sal_path) || !file.exists(pres_path)) next
+
+        depth_clean <- str_remove_all(depth, "[-]|\\.0$")
+        temp_var <- paste0("temperature_depth_", depth_clean, "_std")
+        sal_var  <- paste0("salinity_depth_", depth_clean, "_std")
+        pres_var <- paste0("pressure_depth_", depth_clean, "_std")
+        mvel_var <- paste0("meridional_velocity_depth_", depth_clean, "_std")
+        zvel_var <- paste0("zonal_velocity_depth_", depth_clean, "_std")
+
+        temp_long <- pivot_grid(read_csv(temp_path, show_col_types = FALSE), temp_var)
+        sal_long  <- pivot_grid(read_csv(sal_path, show_col_types = FALSE),  sal_var)
+        pres_long <- pivot_grid(read_csv(pres_path, show_col_types = FALSE), pres_var)
+        mvel_long <- pivot_grid(read_csv(mvel_path, show_col_types = FALSE), mvel_var)
+        zvel_long <- pivot_grid(read_csv(zvel_path, show_col_types = FALSE), zvel_var)
+
+        depth_df <- temp_long %>%
+          left_join(sal_long, by = c("lat", "lon")) %>%
+          left_join(pres_long, by = c("lat", "lon")) %>%
+          left_join(mvel_long, by = c("lat", "lon")) %>%
+          left_join(zvel_long, by = c("lat", "lon"))
+
+        combined <- if (is.null(combined)) depth_df else left_join(combined, depth_df, by = c("lat", "lon"))
+      }
+      for (depth in c("55", "105", "280")) {
+        z_col <- paste0("zonal_velocity_depth_", depth, "_std")
+        m_col <- paste0("meridional_velocity_depth_", depth, "_std")
+        mag_col <- paste0("magnitude_depth_", depth, "_std")
+        theta_col <- paste0("theta_depth_", depth, "_std")
+        combined[[mag_col]] <- sqrt(combined[[z_col]]^2 + combined[[m_col]]^2)
+        combined[[theta_col]] <- atan2(combined[[z_col]], combined[[m_col]])
+      }
+      for (depth in c("55", "105", "280")) {
+        for (suffix in c("magnitude", "theta")) {
+          col <- paste0(suffix, "_depth_", depth, "_std")
+          combined[[col]] <- scale(combined[[col]])[, 1]
+        }
+      }
+      combined <- combined %>% add_utm_columns(ll_names = c("lon", "lat")) %>% drop_na()
+      season_data[[length(season_data) + 1]] <- combined
+    }
+
+    
+    
+    if (length(season_data) == 0) next
+
+    combined_season <- bind_rows(season_data) %>%
+      group_by(lon, lat) %>%
+      summarise(across(everything(), mean, na.rm = TRUE), .groups = "drop") %>%
+      mutate(season = as.numeric(year) + season_val)
+    pred <- predict(fit, newdata = combined_season, type = "response")
+    pred$lon <- combined_season$lon
+    pred$lat <- combined_season$lat
+    observed <- test_data %>%
+      filter(season == as.numeric(year) + season_val, !is.na(resp), resp > 0) %>%
+      select(lon, lat, resp)
+    
+    # Define bounding box from prediction
+    lon_min <- min(pred$lon, na.rm = TRUE)
+    lon_max <- max(pred$lon, na.rm = TRUE)
+    lat_min <- min(pred$lat, na.rm = TRUE)
+    lat_max <- max(pred$lat, na.rm = TRUE)
+
+
+    # Crop coastline to match prediction extent
+    coast_crop <- sf::st_crop(coast, xmin = lon_min, xmax = lon_max,
+                                  ymin = lat_min, ymax = lat_max)
+    season_label <- c("Winter", "Spring", "Summer", "Fall")[[which(c(0, 0.25, 0.5, 0.75) == season_val)]]
+    
+    p <- ggplot(pred, aes(x = lon, y = lat)) +
+    geom_tile(aes(fill = est)) +
+    geom_sf(data = coast_crop, inherit.aes = FALSE, color = "black", fill = NA, size = 0.3) +
+    coord_sf(xlim = c(lon_min, lon_max), ylim = c(lat_min, lat_max), expand = FALSE) +
+    scale_x_continuous(name = "Longitude", labels = scales::number_format(accuracy = 1)) +
+    scale_y_continuous(name = "Latitude", labels = scales::number_format(accuracy = 1)) +
+    scale_fill_viridis_c(
+      name = "Predicted",
+      limits = if (cap > 0) c(0, cap) else NULL,
+      oob = scales::squish
+    ) +
+    labs(
+      title = paste(season_label, year)
+    ) +
+    theme_minimal() +
+    theme(
+      legend.background = element_rect(fill = "transparent", color = NA),
+      legend.box.background = element_rect(fill = "transparent", color = NA),
+      legend.key = element_rect(fill = "transparent", color = NA),
+      panel.background = element_rect(fill = "transparent", color = NA)
+    )
+
+      
+    # Add observed detections and non-detections
+    if (nrow(observed) > 0) {
+      observed <- observed %>%
+        filter(lon >= lon_min, lon <= lon_max, lat >= lat_min, lat <= lat_max)
+
+      observed[[resp]] <- as.numeric(as.character(observed[[resp]]))
+      detected <- observed %>% filter(.data[[resp]] > 0)
+      nondetected <- observed %>% filter(.data[[resp]] == 0)
+
+      # Add detections (sized red points)
+      if (nrow(detected) > 0) {
+        p <- p +
+          geom_point(
+            data = detected,
+            aes(x = lon, y = lat, size = .data[[resp]]),
+            color = "red", shape = 21, stroke = 0.5, fill = "red"
+          )
+      }
+    
+      # Add non-detections (small blue dots)
+      if (nrow(nondetected) > 0) {
+        p <- p +
+          geom_point(
+            data = nondetected,
+            aes(x = lon, y = lat),
+            color = "lightblue", size = 0.5, shape = 21, stroke = 0.3, fill = "lightblue"
+          )
+      }
+    max_obs <- max(test_data[[resp]], na.rm = TRUE)
+    p <- p + scale_size_continuous(
+      name = "Observed",
+      range = c(1, 3),  # dot sizes (not legend) still start from 1
+      limits = c(1, max_obs),  # includes 0 for completeness
+      breaks = pretty(c(1, max_obs), n = 4)  # legend starts at 1
+    )
+  }
+
+
+    plots[[season_label]] <- p
+  }
+  return(plots)
+}
+```
+
+## The best model
+
+```{r}
+# Create mesh using training data
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 10)
+
+# Fit spatiotemporal model
+fit_spatiotemporal <- sdmTMB(
+  d_scaled ~ lat + lon + temperature_depth_55_std + salinity_depth_55_std + magnitude_depth_55_std + theta_depth_55_std,  
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"), 
+  spatial = "on", 
+  spatiotemporal = "iid",
+  extra_time = unique(test_data$season)
+)
+
+# Extract coefficients and sanity check
+#tidy(fit_spatiotemporal, conf.int = TRUE)
+sanity(fit_spatiotemporal)
+
+# Predictions on training and test data
+training_pred <- predict(fit_spatiotemporal, newdata = train_data, type = "response")
+training_pred$observed <- train_data$d_scaled
+
+test_pred <- predict(fit_spatiotemporal, newdata = test_data, type = "response")
+test_pred$observed <- test_data$d_scaled
+
+# Plotting the predictions
+p0 <- ggplot(training_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Train") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+p1 <- ggplot(test_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Test") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+gridExtra::grid.arrange(p0, p1)
+
+# Compute RMSE
+rmse_train <- rmse(training_pred$observed, training_pred$est)
+rmse_test <- rmse(test_pred$observed, test_pred$est)
+
+# Compute Range
+range_train <- range(train_data$d_scaled, na.rm = TRUE)
+range_test <- range(test_data$d_scaled, na.rm = TRUE)
+
+# Compute Standard Deviation
+sd_train <- sd(train_data$d_scaled, na.rm = TRUE)
+sd_test <- sd(test_data$d_scaled, na.rm = TRUE)
+
+# Assemble the table
+summary_table <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(rmse_train, rmse_test),
+  Range_Min = c(range_train[1], range_test[1]),
+  Range_Max = c(range_train[2], range_test[2]),
+  Std_Dev = c(sd_train, sd_test)
+)
+
+# Print the summary table
+print(summary_table)
+
+d_plots <- generate_seasonal_prediction_plots(fit_spatiotemporal, year = "2023", test_data = test_data, cap = 0.5, resp = "d_scaled")
+wrap_d_plots <- wrap_plots(d_plots, ncol = 2, nrow = 2, guides = "collect") +
+  plot_annotation(
+    title = "Seasonal D Call Density Predictions (2023)",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16))
+  )
+print(wrap_d_plots)
+```
+
+## Conclusion
+
+Exploratory plots revealed that D-call counts are dominated by zeros with only a handful of high-intensity events, and that key oceanographic variables (temperature, salinity, pressure, current speed/direction) showed minimal nonlinear association with call intensity across 55 m, 105 m and 280 m depths. Consistent with this, the best‐supported delta-gamma model relied primarily on spatial–temporal structure; fixed-effect coefficients for environmental covariates were small and often non-significant. Nonetheless, the model achieved reasonable predictive accuracy (RMSE ≈ 1.25 on training data and 0.68 on the 2023 hold-out set, well within one standard deviation of observed counts). Convergence diagnostics were acceptable overall, although elevated gradients and large standard errors for some random-effect parameters suggest scope for further optimisation or mesh refinement.
+
+Ecologically, our findings indicate that coarse-resolution hydrographic fields alone do not explain the patchiness of blue-whale foraging calls; finer-scale proxies for prey (e.g., zooplankton biomass), bathymetric complexity, or dynamic features such as fronts and eddies may be necessary. Future work should experiment with hierarchical hurdle models that incorporate prey layers, test alternative temporal resolutions (monthly vs. seasonal), and extend the framework to simultaneous multi-call models to compare behavioural niches directly. Despite these limitations, the generated prediction maps provide a first spatially-explicit baseline for D-call activity and can guide targeted acoustic monitoring or ecosystem management in the region.

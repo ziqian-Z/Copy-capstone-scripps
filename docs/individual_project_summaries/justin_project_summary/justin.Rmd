@@ -1,0 +1,170 @@
+# Justin Individual Report 
+
+
+## Summary of Contributions 
+
+Throughout the project, I took on the task of adding in data, cleaning data, modeling blue whale calls, and a majority of my efforts in creating visualizations. 
+
+
+
+## Cleaning data 
+
+In the beginning, Michaela Alksne provided us with CalCOFI acoustic data. We decided that it would be best if we could combine them and clean the column names. I wrote a script that would read in all the merged acoustic data and clean the column names for future 
+
+
+```{r eval = FALSE} 
+
+# View the merged data
+view(merged_CalCOFI)
+
+colnames(merged_CalCOFI)[4] = "Station_Key"
+# Iterate through column names and remove duplicate columns 
+merged_CalCOFI <- merged_CalCOFI[, !duplicated(colnames(merged_CalCOFI))]
+
+# View the merged data
+view(merged_CalCOFI)
+
+# Change column names to be snake case
+colnames(merged_CalCOFI) <- tolower(colnames(merged_CalCOFI))
+
+# If column names have spaces, period or commas, replace with underscores
+colnames(merged_CalCOFI) <- gsub(" ", "_", colnames(merged_CalCOFI))
+colnames(merged_CalCOFI) <- gsub("\\.", "_", colnames(merged_CalCOFI))
+colnames(merged_CalCOFI) <- gsub(",", "_", colnames(merged_CalCOFI))
+
+# View the merged data
+view(merged_CalCOFI)
+```
+
+
+
+
+## Adding Euphasia and Larvae Data 
+
+
+
+
+## Acoustic Data Visuaslization
+
+## Blue Whale Calls
+
+
+A part of my work was to also work with the A, B, D calls to model and predict Blue Whale Calls on the southern coast. I first prepared the data by assigning the seasons correctly: Winter would have December, January, February. After which, I mutated the A, B, D calls and added them together to get the total whale calls. This way, I was able to get my actual response variable which was the total collective amount of blue whale calls at any given moment 
+
+
+```{r eval = FALSE}
+raw_data <- read.csv("../../data/Merged_CalCOFI/STD_CalCOFI_final")
+# Create a new `seasonal_category` column
+prep_data <- raw_data %>% 
+  mutate(seasonal_category = case_when(
+    month %in% c(12, 1, 2)  ~ "Winter",
+    month %in% c(3, 4, 5)   ~ "Spring",
+    month %in% c(6, 7, 8)   ~ "Summer",
+    month %in% c(9, 10, 11) ~ "Fall"
+  ))
+
+# Removing the first two columns
+prep_data <- prep_data[, -c(1, 2)]
+# Create fin whale response column
+prep_data <- prep_data %>%
+  mutate(blue_resp = a_scaled + b_scaled + d_scaled)
+
+```
+
+I then attempted to do exploratory data analysis on the data in order to see if we can visually detect any trends between the predictors and the response variables. The graph would plot each individual call with a different color for better visibility of the distribution of each call 
+
+```{r eval = FALSE}
+library(ggExtra)
+
+predictors <- c(
+  "lon", "lat", "date", "season", "est_depth", "larvae_count",
+  "temperature_depth_55", "temperature_depth_105", "temperature_depth_280",
+  "pressure_depth_55", "pressure_depth_105", "pressure_depth_280",
+  "salinity_depth_55", "salinity_depth_105", "salinity_depth_280",
+  "magnitude_depth_55", "magnitude_depth_105", "magnitude_depth_280",
+  "theta_depth_55", "theta_depth_105", "theta_depth_280"
+)
+
+
+
+
+library(ggExtra)
+library(gridExtra)
+
+# Prepare data
+long_cal_data <- cal_data %>%
+  select(one_of(predictors), a_scaled, b_scaled, d_scaled, blue_resp) %>%
+  pivot_longer(cols = c(a_scaled, b_scaled, d_scaled),
+               names_to = "source", values_to = "contribution") %>%
+  filter(!is.na(contribution), contribution > 5)
+
+# List to hold ggMarginal plots (ggExtraPlot objects)
+plot_list <- list()
+
+for (var in predictors) {
+  clean_data <- long_cal_data[!is.na(long_cal_data[[var]]) & !is.na(long_cal_data$blue_resp), ]
+  
+  base_plot <- ggplot(clean_data, aes_string(x = var, y = "contribution", color = "source")) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm", se = FALSE) +
+    theme_classic() +
+    ggtitle(paste(var))
+  
+  marginal_plot <- ggMarginal(base_plot, type = "histogram", groupColour = TRUE, groupFill = TRUE)
+  
+  plot_list[[var]] <- marginal_plot  # Store the full ggExtraPlot object
+}
+# 
+# # Plot the first 6 in a 3x2 grid
+# do.call(grid.arrange, c(plot_list[1:4], ncol = 2))
+
+# Optional: Loop through all in chunks
+chunks <- split(plot_list, ceiling(seq_along(plot_list) / 4))
+for (chunk in chunks) {
+  do.call(grid.arrange, c(chunk, ncol = 2))
+}
+```
+
+Throughout the graphs, I did realize that the calls were centered more towards a middle value rather than random. 
+
+
+
+After the exploratory data analysis, I then tried to make a 
+
+
+```{r eval = FALSE}
+set.seed(123)
+last_year <- c(2023)
+
+# Changing dataset to only have present response data
+cal_data <- prep_data %>% 
+  filter(!is.na(blue_resp))
+
+train_data <- cal_data %>% filter(!year %in% last_year)
+test_data  <- cal_data %>% filter(year %in% last_year)
+# DELTA GAMMA
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 10)
+# Fit spatiotemporal model
+fit <- sdmTMB(
+  blue_resp ~ lat + lon + temperature_depth_55_std + salinity_depth_55_std,
+  data = train_data,
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"),
+  spatial = "on",
+  spatiotemporal = "iid",
+  extra_time = seq(2023.00, 2023.75, by = 0.25)
+)
+
+blue_plots <- generate_seasonal_prediction_plots(fit, year = "2023", test_data = test_data, cap = 2, resp = "blue_resp")
+wrap_plots(blue_plots, ncol = 2, nrow = 2, guides = "collect") +
+  plot_annotation(
+    title = "Seasonal Blue Whale Density Predictions (2023)",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16))
+  )
+
+```
+
+## Whale Call Model Visualizaition

@@ -1,0 +1,83 @@
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+```
+
+
+```{r, echo=FALSE}
+full <- read.csv("/Users/josh/Documents/GitHub/capstone-scripps/data/combined/combined_data.csv")
+View(full)
+
+```
+
+```{r, echo=FALSE}
+cut <- full %>% drop_na(Duration_hrs) %>% group_by(Station_key) %>%
+  mutate(total_hrs = sum(Duration_hrs)) %>%
+  mutate(total_x20hz = sum(X20Hz)) %>%
+  mutate(total_d = sum(D)) %>%
+  mutate(total_a = sum(A)) %>%
+  mutate(total_b = sum(B)) %>%
+  mutate(total_x40hz = sum(X40Hz))
+
+m20 <- lm(total_x20hz ~ total_hrs, cut)
+m40 <- lm(total_x40hz ~ total_hrs, cut)
+ma <- lm(total_a ~ total_hrs, cut)
+mb <- lm(total_b ~ total_hrs, cut)
+md <- lm(total_d ~ total_hrs, cut)
+
+r20 <- summary(m20)$r.squared
+r40 <- summary(m40)$r.squared
+ra <- summary(ma)$r.squared
+rb <- summary(mb)$r.squared
+rd <- summary(md)$r.squared
+```
+
+
+long <- cut %>% pivot_longer(cols = starts_with("total_") & !grepl("total_hrs", names(cut)), names_to = "var", values_to = "val")
+
+Now plot total hours vs all totals, need to combine onto 1 plot
+
+```{r, echo=FALSE}
+ggplot(cut, aes(x = total_hrs)) +
+  geom_point(aes(y = total_x20hz), color = "blue") +
+  geom_point(aes(y = total_x40hz), color = "red") + 
+  geom_point(aes(y = total_d), color = "green") +
+  geom_point(aes(y = total_b), color = "yellow") +
+  geom_point(aes(y = total_a), color = "orange") +
+  labs(y = "Number of Observed Whale Calls", x = "Total Hours Recorded")+
+  theme_minimal()
+
+
+
+ggplot(cut, aes(x = total_hrs, y = total_x20hz)) +
+  geom_point(color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_x20hz) * .9, label = paste("R² = ", round(r20,3)))+
+  theme_minimal()
+
+ggplot(cut, aes(x = total_hrs, y = total_d)) +
+  geom_point(color = "green") +
+  geom_smooth(method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_d) * .9, label = paste("R² = ", round(rd,3)))+
+  theme_minimal()
+
+ggplot(cut, aes(x = total_hrs, y = total_x40hz)) +
+  geom_point(color = "red") +
+  geom_smooth(method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_x40hz) * .9, label = paste("R² = ", round(r40,3)))+
+  theme_minimal()
+
+ggplot(cut, aes(x = total_hrs, y = total_b)) +
+  geom_point(color = "yellow") +
+  geom_smooth(method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_b) * .9, label = paste("R² = ", round(rb,3)))+
+  theme_minimal()
+
+ggplot(cut, aes(x = total_hrs, y = total_a)) +
+  geom_point(color = "orange") +
+  geom_smooth(method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_a) * .9, label = paste("R² = ", round(ra,3)))+
+  theme_minimal()
+```
+

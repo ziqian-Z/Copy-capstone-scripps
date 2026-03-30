@@ -1,0 +1,174 @@
+---
+title: "Stepwise Selection 20hz"
+output: html_document
+---
+
+```{r, message = F, warning = F}
+# Load in the libraries
+library(tidyverse)
+library(sdmTMB)
+library(ggplot2)
+library(janitor)
+library(sp)
+library(readr)
+library(ggcorrplot)
+library(Metrics)
+library(naniar)
+library(tibble)
+library(rsample)
+library(caret)
+library(purrr)
+library(tune)
+
+# Read in the data
+cal_data <- read.csv("/Users/josh/Documents/GitHub/capstone-scripps/data/Merged_CalCOFI/STD_CalCOFI_final")
+```
+
+```{r}
+# Removing the first two columns
+cal_data <- cal_data[, -c(1, 2)]
+
+# Removing larvae and euphasia abundance
+cal_data <- cal_data %>% 
+  select(-euphasia_abundance, -euphasia_abundance_std, -larvae_count, -larvae_count_std, - total_abundance, -total_abundance_std)
+
+# Changing dataset to only have present response data
+cal_data <- cal_data %>% 
+  filter(!is.na(x20hz_scaled))
+```
+
+
+```{r}
+cols_to_use <- c("est_depth_std", "temperature_depth_55_std", "salinity_depth_55_std", "magnitude_depth_55_std",  "theta_depth_55_std")
+
+existing_cols <- intersect(cols_to_use, colnames(cal_data))
+cor_data <- cal_data[, existing_cols, drop = FALSE]
+
+# Compute correlation matrix (use complete.obs to skip missing data)
+cor_matrix <- cor(cor_data, use = "complete.obs")
+
+# Correlation plot
+ggcorrplot(cor_matrix, 
+           lab = TRUE, 
+           hc.order = TRUE, 
+           lab_size =2,
+           tl.cex = 5,
+           type = "lower", 
+           title = "Correlation Plot")
+
+```
+
+```{r}
+
+all_combos <- unlist(
+  lapply(1:length(cols_to_use), function(i) {
+    combn(cols_to_use, i, simplify = FALSE)
+  }), recursive = FALSE
+)
+```
+
+
+```{r}
+
+set.seed(123)
+last_year <- max(cal_data$year)
+train_data <- cal_data %>% filter(year != last_year)
+test_data <- cal_data %>% filter(year == last_year)
+
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 5)
+
+results <- map_dfr(all_combos, function(preds) {
+  # build formula: if preds is empty use "~ 1", else list predictors
+  rhs <- if (length(preds)) paste(preds, collapse = " + ") else "1"
+  f <- as.formula(paste("x20hz_scaled ~", rhs))
+  
+  # try fitting, capture errors
+  fit <- tryCatch({
+    sdmTMB(
+      formula        = f,
+      data           = train_data,
+      mesh           = mesh_train,
+      time           = "season",
+      family         = delta_gamma(link1 = "logit", link2 = "log"),
+      spatial        = "on",
+      spatiotemporal = "ar1",
+      extra_time     = unique(test_data$season)
+    )
+  }, error = function(e) NULL)
+  
+  # extract AIC or mark as NA on failure
+  tibble(
+    predictors = paste(preds, collapse = ", "),
+    AIC        = if (!is.null(fit)) AIC(fit) else NA_real_
+  )
+})
+
+# 3. Find the combination with lowest AIC
+best <- results %>% filter(!is.na(AIC)) %>% arrange(AIC)
+best
+```
+
+```{r, eval = FALSE}
+set.seed(123)
+last_year <- max(cal_data$year)
+train_data <- cal_data %>% filter(year != last_year)
+test_data <- cal_data %>% filter(year == last_year)
+
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 10)
+
+fit_spatiotemporal <- sdmTMB(
+  x20hz_scaled ~ est_depth_std,  
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"), 
+  spatial = "off", 
+  spatiotemporal = "iid",
+  extra_time = unique(test_data$season)
+)
+
+AIC(fit_spatiotemporal)
+```
+
+This is spatial on (i think) used temp 55, sal 55, lon, lat, est depth, mag 55, theta 55, season, didnt take out NA first
+
+A tibble: 244 × 2
+    predictors                                                                AIC
+    <chr>                                                                   <dbl>
+1 est_depth_std                                                        -8.45e24
+2 temperature_depth_55_std, salinity_depth_55_std, lon, lat             1.69e 3
+3 est_depth_std, temperature_depth_55_std, salinity_depth_55_std, lat   1.69e 3
+4 est_depth_std, temperature_depth_55_std, lat                          1.69e 3
+5 est_depth_std, temperature_depth_55_std                               1.69e 3
+6 est_depth_std, temperature_depth_55_std, salinity_depth_55_std, the…  1.69e 3
+7 temperature_depth_55_std, lon, lat                                    1.69e 3
+8 temperature_depth_55_std, salinity_depth_55_std, magnitude_depth_55…  1.69e 3
+9 temperature_depth_55_std, salinity_depth_55_std, theta_depth_55_std…  1.69e 3
+10 est_depth_std, temperature_depth_55_std, salinity_depth_55_std, mag…  1.69e 3
+ℹ 234 more rows
+
+
+This is with spatial on, random walk, time = season
+
+c("est_depth_std", "temperature_depth_55_std", "salinity_depth_55_std", "magnitude_depth_55_std",  "theta_depth_55_std", "lon", "lat", "season")
+
+Ran this from friday to tuesday took so so long
+
+A tibble: 225 × 2
+    predictors                                                                AIC
+    <chr>                                                                   <dbl>
+  1 temperature_depth_55_std, theta_depth_55_std                            3322.
+  2 est_depth_std, temperature_depth_55_std, magnitude_depth_55_std, theta… 3325.
+  3 theta_depth_55_std                                                      3328.
+  4 temperature_depth_55_std, magnitude_depth_55_std, season                3328.
+  5 est_depth_std, temperature_depth_55_std, salinity_depth_55_std, magnit… 3328.
+  6 temperature_depth_55_std, theta_depth_55_std, lon                       3328.
+  7 temperature_depth_55_std, salinity_depth_55_std, theta_depth_55_std, s… 3329.
+  8 magnitude_depth_55_std, theta_depth_55_std                              3330.
+  9 salinity_depth_55_std, theta_depth_55_std                               3330.
+ 10 temperature_depth_55_std, salinity_depth_55_std, magnitude_depth_55_st… 3330.
+ℹ 215 more rows

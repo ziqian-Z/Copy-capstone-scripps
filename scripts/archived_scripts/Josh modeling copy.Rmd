@@ -1,0 +1,264 @@
+---
+title: "Fin Whale Modeling Template"
+output: html_document
+---
+
+```{r}
+# Load in the libraries
+library(tidyverse)
+library(sdmTMB)
+library(ggplot2)
+#library(INLA)
+library(janitor)
+library(sp)
+library(readr)
+library(ggcorrplot)
+library(Metrics)
+library(rsample)
+
+# Read in the data
+#cal_data <- read.csv("~/Documents/Capstone/capstone-scripps/data/Merged_CalCOFI/STD_CalCOFI_final_merged_data.csv")
+
+cal_data <- read.csv("/Users/josh/Documents/GitHub/capstone-scripps/data/Merged_CalCOFI/STD_CalCOFI_final_merged_data.csv")
+
+#View(cal_data)
+```
+
+
+```{r}
+# Plotting Correlation
+# Define expected columns
+cols_to_use <- c("est_depth", 
+                 "temperature_depth_105", "temperature_depth_280", "temperature_depth_55", 
+                 "salinity_depth_105", "salinity_depth_280", "salinity_depth_55", 
+                 "meridional_velocity_depth_105", "meridional_velocity_depth_280", "meridional_velocity_depth_55", 
+                 "zonal_velocity_depth_105", "zonal_velocity_depth_280", "zonal_velocity_depth_55", 
+                 "vertical_velocity_depth_105", "vertical_velocity_depth_280", "vertical_velocity_55")
+
+# Keep only existing columns
+existing_cols <- intersect(cols_to_use, colnames(cal_data))
+cor_data <- cal_data[, existing_cols, drop = FALSE]
+
+# Compute correlation matrix (use complete.obs to skip missing data)
+cor_matrix <- cor(cor_data, use = "complete.obs")
+
+# Correlation plot
+ggcorrplot(cor_matrix, 
+           lab = TRUE, 
+           hc.order = TRUE, 
+           lab_size =2,
+           tl.cex = 5,
+           type = "lower", 
+           title = "Correlation Plot")
+```
+
+```{r}
+cor_dep_lar <- c("est_depth","euphasia_abundance", "total_abundance","larvae_count")
+finding_cols <- intersect(cor_dep_lar, colnames(cal_data))
+cor_data_prey<- cal_data[, finding_cols, drop = FALSE]
+
+cor_matrix_prey <- cor(cor_data_prey, use = "complete.obs")
+
+ggcorrplot(cor_matrix_prey, 
+           lab = TRUE, 
+           lab_size = 2,
+           hc.order = TRUE, 
+           type = "lower", 
+           title = "Correlation Plot",
+           tl.cex = 5)
+```
+
+```{r}
+# TWEEDIE
+# Create fin whale response column before splitting
+cal_data <- cal_data %>%
+  mutate(fin_resp = x20hz_scaled + x40hz_scaled)
+
+# Split data into training and testing sets (90% train)
+#set.seed(123)
+#split <- initial_split(cal_data, prop = 0.9)
+#train_data <- training(split)
+#test_data  <- testing(split)
+
+#Split data into 1 year for testing, rest is training
+random_year <- sample(unique(cal_data$year), 1)
+train_data <- cal_data %>% filter(year != random_year)
+test_data <- cal_data %>% filter(year == random_year)
+
+# Mean imputation for missing numeric values in train and test sets
+train_data <- train_data %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+test_data <- test_data %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+#View(train_data)
+
+```
+
+```{r}
+# Create mesh using training data
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 5)
+plot(mesh_train)
+```
+
+```{r}
+# Fit spatiotemporal model
+fit_spatiotemporal <- sdmTMB(
+  fin_resp ~ est_depth_std + temperature_depth_105_std + temperature_depth_280_std +
+    temperature_depth_55_std + salinity_depth_105_std +
+    meridional_velocity_depth_105_std + meridional_velocity_depth_55_std +
+    zonal_velocity_depth_105_std + zonal_velocity_depth_55_std +
+    vertical_velocity_depth_105_std + vertical_velocity_depth_55_std +
+    larvae_count_std, 
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = tweedie(link = "log"), 
+  spatial = "off", 
+  spatiotemporal = "iid"
+)
+
+# Extract coefficients and sanity check
+tidy(fit_spatiotemporal, conf.int = TRUE)
+sanity(fit_spatiotemporal)
+
+# Predictions on training and test data
+training_pred <- predict(fit_spatiotemporal, newdata = train_data)
+training_pred$observed <- train_data$fin_resp
+
+test_pred <- predict(fit_spatiotemporal, newdata = test_data, extra_time = TRUE)
+test_pred$observed <- test_data$fin_resp
+
+# Plotting the predictions
+p0 <- ggplot(training_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Train") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+p1 <- ggplot(test_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Test") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+gridExtra::grid.arrange(p0, p1)
+
+# Compute RMSE
+rmse_train <- rmse(training_pred$observed, training_pred$est)
+rmse_test <- rmse(test_pred$observed, test_pred$est)
+
+# Compute Range
+range_train <- range(train_data$fin_resp, na.rm = TRUE)
+range_test <- range(test_data$fin_resp, na.rm = TRUE)
+
+# Compute Standard Deviation
+sd_train <- sd(train_data$fin_resp, na.rm = TRUE)
+sd_test <- sd(test_data$fin_resp, na.rm = TRUE)
+
+# Assemble the table
+summary_table <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(rmse_train, rmse_test),
+  Range_Min = c(range_train[1], range_test[1]),
+  Range_Max = c(range_train[2], range_test[2]),
+  Std_Dev = c(sd_train, sd_test)
+)
+
+# Print the summary table
+print(summary_table)
+```
+
+```{r}
+# DELTA GAMMA
+# Create fin whale response column before splitting
+cal_data <- cal_data %>%
+  mutate(fin_resp = x20hz_scaled + x40hz_scaled)
+
+# Split data into training and testing sets (90% train)
+set.seed(123)
+split <- initial_split(cal_data, prop = 0.9)
+train_data <- training(split)
+test_data  <- testing(split)
+
+# Mean imputation for missing numeric values in train and test sets
+train_data <- train_data %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+test_data <- test_data %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+# Create mesh using training data
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 5)
+plot(mesh_train)
+
+# Fit spatiotemporal model
+fit_spatiotemporal <- sdmTMB(
+  fin_resp ~ est_depth_std + temperature_depth_105_std + temperature_depth_280_std +
+    temperature_depth_55_std + salinity_depth_105_std +
+    meridional_velocity_depth_105_std + meridional_velocity_depth_55_std +
+    zonal_velocity_depth_105_std + zonal_velocity_depth_55_std +
+    vertical_velocity_depth_105_std + vertical_velocity_depth_55_std +
+    larvae_count_std, 
+  data = train_data, 
+  mesh = mesh_train,
+  time = "year",
+  family = delta_gamma(link1 = "logit", link2 = "log"), 
+  spatial = "off", 
+  spatiotemporal = "iid"
+)
+
+# Extract coefficients and sanity check
+tidy(fit_spatiotemporal, conf.int = TRUE)
+sanity(fit_spatiotemporal)
+
+# Predictions on training and test data
+training_pred <- predict(fit_spatiotemporal, newdata = train_data, type = "response", extra_time = TRUE)
+training_pred$observed <- train_data$fin_resp
+
+test_pred <- predict(fit_spatiotemporal, newdata = test_data, type = "response")
+test_pred$observed <- test_data$fin_resp
+
+# Plotting the predictions
+p0 <- ggplot(training_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Train") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+p1 <- ggplot(test_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Test") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+gridExtra::grid.arrange(p0, p1)
+
+# Compute RMSE
+rmse_train <- rmse(training_pred$observed, training_pred$est)
+rmse_test <- rmse(test_pred$observed, test_pred$est)
+
+# Compute Range
+range_train <- range(train_data$fin_resp, na.rm = TRUE)
+range_test <- range(test_data$fin_resp, na.rm = TRUE)
+
+# Compute Standard Deviation
+sd_train <- sd(train_data$fin_resp, na.rm = TRUE)
+sd_test <- sd(test_data$fin_resp, na.rm = TRUE)
+
+# Assemble the table
+summary_table <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(rmse_train, rmse_test),
+  Range_Min = c(range_train[1], range_test[1]),
+  Range_Max = c(range_train[2], range_test[2]),
+  Std_Dev = c(sd_train, sd_test)
+)
+
+# Print the summary table
+print(summary_table)
+```
+
+
+

@@ -1,0 +1,426 @@
+```{r}
+# Load in the libraries
+library(tidyverse)
+library(sdmTMB)
+library(ggplot2)
+library(janitor)
+library(sp)
+library(readr)
+library(ggcorrplot)
+library(Metrics)
+library(naniar)
+library(tibble)
+library(rsample)
+library(caret)
+library(purrr)
+library(tune)
+library(sf)
+library(rnaturalearth)
+library(patchwork)
+# Read in the data
+raw_data <- read.csv("../../data/Merged_CalCOFI/merged_std_data_05_13_25.csv")
+```
+
+```{r}
+# Create a new `seasonal_category` column
+prep_data <- raw_data %>% 
+  mutate(seasonal_category = case_when(
+    month %in% c(12, 1, 2)  ~ "Winter",
+    month %in% c(3, 4, 5)   ~ "Spring",
+    month %in% c(6, 7, 8)   ~ "Summer",
+    month %in% c(9, 10, 11) ~ "Fall"
+  ))
+
+# Removing the first two columns
+prep_data <- prep_data[, -c(1, 2)]
+# Create fin whale response column
+prep_data <- prep_data %>%
+  mutate(blue_resp = a_scaled + b_scaled + d_scaled)
+
+```
+
+
+
+
+```{r}
+generate_seasonal_prediction_plots <- function(fit, year, test_data, cap, resp) {
+  
+  plots <- list()
+  coast <- rnaturalearth::ne_coastline(scale = "medium", returnclass = "sf")
+  choose_folder <- function(variable, year) {
+    base_path <- "../../data/Specificdate"
+    if (variable == "temperature") {
+      if (year %in% c("2021", "2022", "2023")) return(file.path(base_path, "Temperature", "temperature_2021-2023"))
+      else return(file.path(base_path, "Temperature", "temperature_avg_output"))
+    }
+    if (variable == "salinity") {
+      if (year %in% c("2021", "2022", "2023")) return(file.path(base_path, "Salinity", "sal_2021-2023"))
+      else return(file.path(base_path, "Salinity", "salinity_avg_output"))
+    }
+    if (variable == "pressure") {
+      if (year %in% c("2021", "2022", "2023")) return(file.path(base_path, "Pressure", "pressure_2021-2023"))
+      else return(file.path(base_path, "Pressure", "pressure_avg_output"))
+    }
+    if (variable == "mvel") {
+      if (year == "2023") return(file.path(base_path, "Meridional_velocity", "meridional_2023"))
+      else if (year %in% c("2021", "2022")) return(file.path(base_path, "Meridional_velocity", "meridional_2021"))
+      else return(file.path(base_path, "Meridional_velocity", "meridional_velocity_avg_output"))
+    }
+    if (variable == "zvel") {
+      if (year == "2023") return(file.path(base_path, "Zonal_velocity", "zonal_2023"))
+      else if (year %in% c("2021", "2022")) return(file.path(base_path, "Zonal_velocity", "zonal_velocity_2021"))
+      else return(file.path(base_path, "Zonal_velocity", "zonal_velocity_avg_output"))
+    }
+  }
+
+  pivot_grid <- function(df, var_name) {
+    df %>%
+      rename(lon = 1) %>%
+      pivot_longer(cols = starts_with("Lat_"), names_to = "lat", values_to = var_name) %>%
+      mutate(
+        lat = as.numeric(str_remove(lat, "Lat_")),
+        lon = as.numeric(str_remove(lon, "Lon_")) - 360,
+        !!var_name := if (!str_detect(var_name, "meridional_velocity|zonal_velocity"))
+          scale(.data[[var_name]])[, 1] else .data[[var_name]]
+      )
+  }
+
+  get_season <- function(month) {
+    case_when(
+      month %in% c(12, 1, 2) ~ 0,
+      month %in% 3:5 ~ 0.25,
+      month %in% 6:8 ~ 0.5,
+      month %in% 9:11 ~ 0.75
+    )
+  }
+
+  for (season_val in c(0, 0.25, 0.5, 0.75)) {
+    # issue in that the 12 is 12 of that year -> need to hardcode 12 of previous year 
+    season_months <- list(`0` = c(12, 1, 2), `0.25` = 3:5, `0.5` = 6:8, `0.75` = 9:11)[[as.character(season_val)]]
+    season_data <- list()
+
+    for (month in season_months) {
+      date <- sprintf("%s-%02d", year, month)
+      combined <- NULL
+      for (depth in c("-55.0", "-105.0", "-280.0")) {
+        added <- paste0("avg_depth_", depth, "_month_", date, ".csv")
+        temp_path <- file.path(choose_folder("temperature", year), paste0("temperature_", added))
+        sal_path  <- file.path(choose_folder("salinity", year), paste0("salinity_", added))
+        pres_path <- file.path(choose_folder("pressure", year), paste0("pressure_", added))
+        mvel_path <- file.path(choose_folder("mvel", year), paste0("meridional_velocity_", added))
+        zvel_path <- file.path(choose_folder("zvel", year), paste0("zonal_velocity_", added))
+
+        if (!file.exists(temp_path) || !file.exists(sal_path) || !file.exists(pres_path)) next
+
+        depth_clean <- str_remove_all(depth, "[-]|\\.0$")
+        temp_var <- paste0("temperature_depth_", depth_clean, "_std")
+        sal_var  <- paste0("salinity_depth_", depth_clean, "_std")
+        pres_var <- paste0("pressure_depth_", depth_clean, "_std")
+        mvel_var <- paste0("meridional_velocity_depth_", depth_clean, "_std")
+        zvel_var <- paste0("zonal_velocity_depth_", depth_clean, "_std")
+
+        temp_long <- pivot_grid(read_csv(temp_path, show_col_types = FALSE), temp_var)
+        sal_long  <- pivot_grid(read_csv(sal_path, show_col_types = FALSE),  sal_var)
+        pres_long <- pivot_grid(read_csv(pres_path, show_col_types = FALSE), pres_var)
+        mvel_long <- pivot_grid(read_csv(mvel_path, show_col_types = FALSE), mvel_var)
+        zvel_long <- pivot_grid(read_csv(zvel_path, show_col_types = FALSE), zvel_var)
+
+        depth_df <- temp_long %>%
+          left_join(sal_long, by = c("lat", "lon")) %>%
+          left_join(pres_long, by = c("lat", "lon")) %>%
+          left_join(mvel_long, by = c("lat", "lon")) %>%
+          left_join(zvel_long, by = c("lat", "lon"))
+
+        combined <- if (is.null(combined)) depth_df else left_join(combined, depth_df, by = c("lat", "lon"))
+      }
+      for (depth in c("55", "105", "280")) {
+        z_col <- paste0("zonal_velocity_depth_", depth, "_std")
+        m_col <- paste0("meridional_velocity_depth_", depth, "_std")
+        mag_col <- paste0("magnitude_depth_", depth, "_std")
+        theta_col <- paste0("theta_depth_", depth, "_std")
+        combined[[mag_col]] <- sqrt(combined[[z_col]]^2 + combined[[m_col]]^2)
+        combined[[theta_col]] <- atan2(combined[[z_col]], combined[[m_col]])
+      }
+      for (depth in c("55", "105", "280")) {
+        for (suffix in c("magnitude", "theta")) {
+          col <- paste0(suffix, "_depth_", depth, "_std")
+          combined[[col]] <- scale(combined[[col]])[, 1]
+        }
+      }
+      combined <- combined %>% add_utm_columns(ll_names = c("lon", "lat")) %>% drop_na()
+      season_data[[length(season_data) + 1]] <- combined
+    }
+
+    
+    
+    if (length(season_data) == 0) next
+
+    combined_season <- bind_rows(season_data) %>%
+      group_by(lon, lat) %>%
+      summarise(across(everything(), mean, na.rm = TRUE), .groups = "drop") %>%
+      mutate(season = as.numeric(year) + season_val)
+    pred <- predict(fit, newdata = combined_season, type = "response")
+    pred$lon <- combined_season$lon
+    pred$lat <- combined_season$lat
+    observed <- test_data %>%
+      filter(season == as.numeric(year) + season_val, !is.na(resp), resp > 0) %>%
+      select(lon, lat, resp)
+    
+    # Define bounding box from prediction
+    lon_min <- min(pred$lon, na.rm = TRUE)
+    lon_max <- max(pred$lon, na.rm = TRUE)
+    lat_min <- min(pred$lat, na.rm = TRUE)
+    lat_max <- max(pred$lat, na.rm = TRUE)
+
+
+    # Crop coastline to match prediction extent
+    coast_crop <- sf::st_crop(coast, xmin = lon_min, xmax = lon_max,
+                                  ymin = lat_min, ymax = lat_max)
+    season_label <- c("Winter", "Spring", "Summer", "Fall")[[which(c(0, 0.25, 0.5, 0.75) == season_val)]]
+    
+    p <- ggplot(pred, aes(x = lon, y = lat)) +
+    geom_tile(aes(fill = est)) +
+    geom_sf(data = coast_crop, inherit.aes = FALSE, color = "black", fill = NA, size = 0.3) +
+    coord_sf(xlim = c(lon_min, lon_max), ylim = c(lat_min, lat_max), expand = FALSE) +
+    scale_x_continuous(name = "Longitude", labels = scales::number_format(accuracy = 1)) +
+    scale_y_continuous(name = "Latitude", labels = scales::number_format(accuracy = 1)) +
+    scale_fill_viridis_c(
+      name = "Predicted",
+      limits = if (cap > 0) c(0, cap) else NULL,
+      oob = scales::squish
+    ) +
+    labs(
+      title = paste(season_label, year)
+    ) +
+    theme_minimal() +
+    theme(
+      legend.background = element_rect(fill = "transparent", color = NA),
+      legend.box.background = element_rect(fill = "transparent", color = NA),
+      legend.key = element_rect(fill = "transparent", color = NA),
+      panel.background = element_rect(fill = "transparent", color = NA)
+    )
+
+      
+    # Add observed detections and non-detections
+    if (nrow(observed) > 0) {
+      observed <- observed %>%
+        filter(lon >= lon_min, lon <= lon_max, lat >= lat_min, lat <= lat_max)
+
+      observed[[resp]] <- as.numeric(as.character(observed[[resp]]))
+      detected <- observed %>% filter(.data[[resp]] > 0)
+      nondetected <- observed %>% filter(.data[[resp]] == 0)
+
+      # Add detections (sized red points)
+      if (nrow(detected) > 0) {
+        p <- p +
+          geom_point(
+            data = detected,
+            aes(x = lon, y = lat, size = .data[[resp]]),
+            color = "red", shape = 21, stroke = 0.5, fill = "red"
+          )
+      }
+    
+      # Add non-detections (small blue dots)
+      if (nrow(nondetected) > 0) {
+        p <- p +
+          geom_point(
+            data = nondetected,
+            aes(x = lon, y = lat),
+            color = "lightblue", size = 0.5, shape = 21, stroke = 0.3, fill = "lightblue"
+          )
+      }
+    max_obs <- max(test_data[[resp]], na.rm = TRUE)
+    p <- p + scale_size_continuous(
+      name = "Observed",
+      range = c(1, 3),  # dot sizes (not legend) still start from 1
+      limits = c(1, max_obs),  # includes 0 for completeness
+      breaks = pretty(c(1, max_obs), n = 4)  # legend starts at 1
+    )
+  }
+
+
+    plots[[season_label]] <- p
+  }
+  return(plots)
+}
+```
+# A call 
+```{r}
+set.seed(123)
+last_year <- c(2023)
+
+# Changing dataset to only have present response data
+cal_data <- prep_data %>% 
+  filter(!is.na(a_scaled))
+train_data <- cal_data %>% filter(!year %in% last_year)
+test_data  <- cal_data %>% filter(year %in% last_year)
+
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 5)
+a_fit <- sdmTMB(
+  a_scaled ~ s(magnitude_depth_55_std) + s(temperature_depth_55_std), 
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"), 
+  spatial = "on", 
+  spatiotemporal = "rw",
+  extra_time =  seq(2023.00, 2023.75, by = 0.25)
+)
+a_plots <- generate_seasonal_prediction_plots(a_fit, year = "2023", test_data = test_data, cap = 0, resp = "a_scaled")
+wrap_a_plots <- wrap_plots(a_plots, ncol = 2, nrow = 2, guides = "collect") +
+  plot_annotation(
+    title = "Seasonal A Call Density Predictions (2023)",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16))
+  )
+print(wrap_a_plots)
+```
+
+# B Call 
+```{r}
+# Changing dataset to only have present response data
+last_year <- c(2023)
+cal_data <- prep_data %>% 
+  filter(!is.na(b_scaled))
+train_data <- cal_data %>% filter(!year %in% last_year)
+test_data  <- cal_data %>% filter(year %in% last_year)
+
+mesh_train <- make_mesh(
+  train_data, c("X", "Y"),
+  cutoff = 35
+)
+
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 10)
+
+b_fit <- sdmTMB(
+  b_scaled ~ lat + lon + temperature_depth_55_std + salinity_depth_55_std + magnitude_depth_55_std + theta_depth_55_std, 
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"), 
+  spatial = "on", 
+  spatiotemporal = "ar1",
+  extra_time =  seq(2023.00, 2023.75, by = 0.25)
+)
+b_plots <- generate_seasonal_prediction_plots(b_fit, year = "2023", test_data = test_data, cap = 5, resp = "b_scaled")
+wrap_b_plots <- wrap_plots(b_plots, ncol = 2, nrow = 2, guides = "collect") +
+  plot_annotation(
+    title = "Seasonal B Call Density Predictions (2023)",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16))
+  )
+print(wrap_b_plots)
+```
+D Call
+```{r}
+
+# Split data into training and testing sets with most recent year as our testing set
+set.seed(123)
+last_year <- c(2023)
+
+# Changing dataset to only have present response data
+cal_data <- prep_data %>% 
+  filter(!is.na(d_scaled))
+
+train_data <- cal_data %>% filter(!year %in% last_year)
+test_data  <- cal_data %>% filter(year %in% last_year)
+
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 10)
+d_fit <- sdmTMB(
+  d_scaled ~ lat + lon + temperature_depth_55_std + salinity_depth_55_std + magnitude_depth_55_std + theta_depth_55_std,
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"), # test to see if logit or cloglog is better 
+  spatial = "on", 
+  spatiotemporal = "iid",
+  extra_time =  seq(2023.00, 2023.75, by = 0.25)
+)
+d_plots <- generate_seasonal_prediction_plots(d_fit, year = "2023", test_data = test_data, cap = 0.5, resp = "d_scaled")
+wrap_d_plots <- wrap_plots(d_plots, ncol = 2, nrow = 2, guides = "collect") +
+  plot_annotation(
+    title = "Seasonal D Call Density Predictions (2023)",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16))
+  )
+print(wrap_d_plots)
+```       
+
+# 20 HZ CALL
+```{r}
+set.seed(123)
+last_year <- c(2023)
+
+# Changing dataset to only have present response data
+cal_data <- prep_data %>% 
+  filter(!is.na(x20hz_scaled))
+
+train_data <- cal_data %>% filter(!year %in% last_year)
+test_data  <- cal_data %>% filter(year %in% last_year)
+# DELTA GAMMA
+
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 5)
+
+fit_20 <- sdmTMB(
+  x20hz_scaled ~ lat + lon + temperature_depth_55_std,  
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"),
+  spatial = "on", 
+  spatiotemporal = "ar1",
+  extra_time = seq(2023.00, 2023.75, by = 0.25),
+  bayesian = TRUE
+)
+
+twenty_plots <- generate_seasonal_prediction_plots(fit_20, year = "2023", test_data = test_data, cap = 50, resp = "x20hz_scaled")
+wrap_20_plots <- wrap_plots(twenty_plots, ncol = 2, nrow = 2, guides = "collect") +
+  plot_annotation(
+    title = "Seasonal 20HZ Call Density Predictions (2023)",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16))
+  )
+print(wrap_20_plots)
+```
+
+
+# 40 hz Call 
+```{r}
+
+# Split data into training and testing sets with most recent year as our testing set
+set.seed(123)
+
+last_year <- c(2023)
+# Changing dataset to only have present response data
+cal_data <- prep_data %>% 
+  filter(!is.na(x40hz_scaled))
+train_data <- cal_data %>% filter(!year %in% last_year)
+test_data  <- cal_data %>% filter(year %in% last_year)
+
+mesh_train <- make_mesh(
+  train_data, c("X", "Y"),
+  cutoff = 1
+)
+
+fit_40 <- sdmTMB(
+  x40hz_scaled ~  lat + lon + temperature_depth_55_std + salinity_depth_55_std + magnitude_depth_55_std + theta_depth_55_std,
+  mesh = mesh_train,
+  data = train_data, 
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"),
+  spatial = "on", 
+  spatiotemporal = "iid",
+  extra_time =  seq(2023.00, 2023.75, by = 0.25)
+)
+fourty_plots <- generate_seasonal_prediction_plots(fit_40, year = "2023", test_data = test_data, cap = 0, resp = "x40hz_scaled")
+wrap_40_plots <- wrap_plots(fourty_plots, ncol = 2, nrow = 2, guides = "collect") +
+  plot_annotation(
+    title = "Seasonal 40HZ Density Predictions (2023)",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16))
+  )
+print(wrap_40_plots)
+```

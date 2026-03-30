@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.1.189">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>EDA For the merged_all_201203 dataset</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1.6em;
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="EDA Merged Acoustic_files/libs/clipboard/clipboard.min.js"></script>
+<script src="EDA Merged Acoustic_files/libs/quarto-html/quarto.js"></script>
+<script src="EDA Merged Acoustic_files/libs/quarto-html/popper.min.js"></script>
+<script src="EDA Merged Acoustic_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="EDA Merged Acoustic_files/libs/quarto-html/anchor.min.js"></script>
+<link href="EDA Merged Acoustic_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="EDA Merged Acoustic_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="EDA Merged Acoustic_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="EDA Merged Acoustic_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="EDA Merged Acoustic_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">EDA For the merged_all_201203 dataset</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+    
+  </div>
+  
+
+</header>
+
+<div class="cell" data-execution_count="2">
+<div class="cell-output cell-output-display">
+<p><img src="EDA%20Merged%20Acoustic_files/figure-html/cell-3-output-1.png" width="934" height="771"></p>
+</div>
+</div>
+<div class="cell" data-execution_count="3">
+<div class="cell-output cell-output-display">
+<p><img src="EDA%20Merged%20Acoustic_files/figure-html/cell-4-output-1.png" width="739" height="648"></p>
+</div>
+</div>
+<p>This heatmap shows where the water is warmer and colder. The numbers inside each box show how many whale calls were detected in that area. Whales seem to prefer cooler waters and might avoid warmer areas. Temperature may be one reason they choose where to go!</p>
+<div class="cell" data-execution_count="4">
+<div class="cell-output cell-output-display">
+<p><img src="EDA%20Merged%20Acoustic_files/figure-html/cell-5-output-1.png" width="748" height="648"></p>
+</div>
+</div>
+<p>Salinity does not show a strong correlation with whale call density.</p>
+<div class="cell" data-execution_count="5">
+<div class="cell-output cell-output-display">
+<p><img src="EDA%20Merged%20Acoustic_files/figure-html/cell-6-output-1.png" width="742" height="648"></p>
+</div>
+</div>
+<p>Whales prefer deep, low-pressure areas, while shallow, high-pressure areas have fewer detections. This matches what we expect since many whales live and communicate in deep waters!</p>
+<div class="cell" data-execution_count="6">
+<div class="cell-output cell-output-display">
+<p><img src="EDA%20Merged%20Acoustic_files/figure-html/cell-7-output-1.png" width="765" height="648"></p>
+</div>
+</div>
+<p>This map shows how ocean currents move north and south in different areas. Red means the water is moving more northward, while blue means it's moving more southward. The boxes show where whales were detected, possibly linking whale activity to these water movements.</p>
+<div class="cell" data-execution_count="7">
+<div class="cell-output cell-output-display">
+<p><img src="EDA%20Merged%20Acoustic_files/figure-html/cell-8-output-1.png" width="750" height="648"></p>
+</div>
+</div>
+<p>This map shows how ocean currents move east and west in different areas. Red means the water is moving more eastward, while blue means it's moving more westward. The boxes show where whales were detected, which might help understand how whales interact with these ocean currents.</p>
+<div class="cell" data-execution_count="8">
+<div class="cell-output cell-output-display">
+<p><img src="EDA%20Merged%20Acoustic_files/figure-html/cell-9-output-1.png" width="750" height="648"></p>
+</div>
+</div>
+<p>Whales are present in areas with both eastward and westward currents, so zonal velocity might not be a major factor in their movement or calling behavior. However, it could still influence their travel paths or food availability.</p>
+<div class="cell" data-execution_count="9">
+<div class="cell-output cell-output-display">
+<p><img src="EDA%20Merged%20Acoustic_files/figure-html/cell-10-output-1.png" width="1516" height="1141"></p>
+</div>
+</div>
+<p>Depth and pressure show a strong correlation with whale detections, meaning whales favor deep sea environments.</p>
+<p>Temperature and salinity do not show strong trends, implying that they do not significantly impact whale call activity.</p>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    target: function(trigger) {
+      return trigger.previousElementSibling;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    setTimeout(function() {
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const cites = ref.parentNode.getAttribute('data-cites').split(' ');
+    tippyHover(ref, function() {
+      var popup = window.document.createElement('div');
+      cites.forEach(function(cite) {
+        var citeDiv = window.document.createElement('div');
+        citeDiv.classList.add('hanging-indent');
+        citeDiv.classList.add('csl-entry');
+        var biblioDiv = window.document.getElementById('ref-' + cite);
+        if (biblioDiv) {
+          citeDiv.innerHTML = biblioDiv.innerHTML;
+        }
+        popup.appendChild(citeDiv);
+      });
+      return popup.innerHTML;
+    });
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>

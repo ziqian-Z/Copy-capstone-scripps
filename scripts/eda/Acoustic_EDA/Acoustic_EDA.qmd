@@ -1,0 +1,426 @@
+---
+title: "EDA For the merged_all_201203 dataset"
+format: html
+editor: visual
+execute:
+  echo: false
+---
+
+```{python, echo=FALSE}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+```
+
+```{python}
+df = pd.read_csv("/Users/sammysu/Downloads/merged_all_201203.csv")
+missing_data = df.isnull()
+plt.figure(figsize=(12, 8))
+sns.heatmap(missing_data, cbar=False, cmap='viridis')
+plt.title("Missing Data Heatmap", fontsize=14) 
+plt.show()
+```
+
+```{python, fig.width=5, fig.height=4}
+grid_size = 15
+
+lat_bins = np.linspace(df["Lat"].min(), df["Lat"].max(), grid_size)
+lon_bins = np.linspace(df["Lon"].min(), df["Lon"].max(), grid_size)
+
+df["lat_bin"] = np.clip(np.digitize(df["Lat"], lat_bins) - 1, 0, grid_size - 2)
+df["lon_bin"] = np.clip(np.digitize(df["Lon"], lon_bins) - 1, 0, grid_size - 2)
+
+agg_data = df.groupby(["lat_bin", "lon_bin"]).agg({
+    "Vertical_velocity": "mean",
+    "Meridional_velocity": "mean",
+    "Zonal_velocity": "mean",
+    "Temperature": "mean",
+    "Pressure": "mean",
+    "Salinity": "mean",
+    "D": "sum",
+    "A": "sum",
+    "B": "sum",
+    "X20Hz": "sum",
+    "X40Hz": "sum"
+}).reset_index()
+
+heatmap_feature = "Temperature"
+
+if agg_data[heatmap_feature].isnull().all():
+    print(f"Warning: {heatmap_feature} contains only NaN values! Please check the data.")
+else:
+    heatmap = np.full((grid_size-1, grid_size-1), np.nan)
+    for _, row in agg_data.iterrows():
+        heatmap[int(row["lat_bin"]), int(row["lon_bin"])] = row[heatmap_feature]
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    sns.heatmap(
+        heatmap, cmap="coolwarm", annot=False, xticklabels=False, yticklabels=False,
+        cbar=True, ax=ax, linewidths=0.1, linecolor="gray", square=True, robust=True
+    )
+
+    for _, row in agg_data.iterrows():
+        lon_idx, lat_idx = int(row["lon_bin"]), int(row["lat_bin"])
+        if lon_idx < grid_size - 1 and lat_idx < grid_size - 1:
+            label = (
+                f"D:{int(row['D']) if not np.isnan(row['D']) else 0} "
+                f"A:{int(row['A']) if not np.isnan(row['A']) else 0} "
+                f"B:{int(row['B']) if not np.isnan(row['B']) else 0}\n"
+                f"20Hz:{int(row['X20Hz']) if not np.isnan(row['X20Hz']) else 0} "
+                f"40Hz:{int(row['X40Hz']) if not np.isnan(row['X40Hz']) else 0}"
+            )
+            ax.text(
+                lon_idx + 0.5, lat_idx + 0.5, label, fontsize=4, ha='center', va='center',
+                color='white', bbox=dict(facecolor='black', alpha=0.5, edgecolor='none')
+            )
+
+    ax.set_xlabel("Longitude Grid", fontsize=8)
+    ax.set_ylabel("Latitude Grid", fontsize=8)
+    ax.set_title(f"Grid Heatmap of {heatmap_feature} with Whale Data Overlay", fontsize=14, fontweight="bold")
+
+    plt.show()
+```
+
+This heatmap shows where the water is warmer and colder. The numbers inside each box show how many whale calls were detected in that area. Whales seem to prefer cooler waters and might avoid warmer areas. Temperature may be one reason they choose where to go!
+
+```{python, fig.width=5, fig.height=4}
+
+grid_size = 15
+
+lat_bins = np.linspace(df["Lat"].min(), df["Lat"].max(), grid_size)
+lon_bins = np.linspace(df["Lon"].min(), df["Lon"].max(), grid_size)
+
+df["lat_bin"] = np.clip(np.digitize(df["Lat"], lat_bins) - 1, 0, grid_size - 2)
+df["lon_bin"] = np.clip(np.digitize(df["Lon"], lon_bins) - 1, 0, grid_size - 2)
+
+agg_data = df.groupby(["lat_bin", "lon_bin"]).agg({
+    "Vertical_velocity": "mean",
+    "Temperature": "mean",
+    "Pressure": "mean",
+    "Salinity": "mean",
+    "D": "sum",
+    "A": "sum",
+    "B": "sum",
+    "X20Hz": "sum",
+    "X40Hz": "sum"
+}).reset_index()
+
+heatmap_feature = "Salinity"
+
+if agg_data[heatmap_feature].isnull().all():
+    print(f"Warning: {heatmap_feature} contains only NaN values! Please check the data.")
+else:
+    heatmap = np.full((grid_size-1, grid_size-1), np.nan)
+    for _, row in agg_data.iterrows():
+        heatmap[int(row["lat_bin"]), int(row["lon_bin"])] = row[heatmap_feature]
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    sns.heatmap(
+        heatmap, cmap="viridis", annot=False, xticklabels=False, yticklabels=False,
+        cbar=True, ax=ax, linewidths=0.1, linecolor="gray", square=True, robust=True
+    )
+
+    for _, row in agg_data.iterrows():
+        lon_idx, lat_idx = int(row["lon_bin"]), int(row["lat_bin"])
+        if lon_idx < grid_size - 1 and lat_idx < grid_size - 1:
+            label = (
+                f"D:{int(row['D']) if not np.isnan(row['D']) else 0} "
+                f"A:{int(row['A']) if not np.isnan(row['A']) else 0} "
+                f"B:{int(row['B']) if not np.isnan(row['B']) else 0}\n"
+                f"20Hz:{int(row['X20Hz']) if not np.isnan(row['X20Hz']) else 0} "
+                f"40Hz:{int(row['X40Hz']) if not np.isnan(row['X40Hz']) else 0}"
+            )
+            ax.text(
+                lon_idx + 0.5, lat_idx + 0.5, label, fontsize=4, ha='center', va='center',
+                color='white', bbox=dict(facecolor='black', alpha=0.5, edgecolor='none')
+            )
+
+    ax.set_xlabel("Longitude Grid", fontsize=8)
+    ax.set_ylabel("Latitude Grid", fontsize=8)
+    ax.set_title(f"Grid Heatmap of {heatmap_feature} with Whale Data Overlay", fontsize=14, fontweight="bold")
+
+    plt.show()
+
+```
+
+Salinity does not show a strong correlation with whale call density. Salinity levels are all very stable.
+
+```{python, fig.width=5, fig.height=4}
+grid_size = 15
+
+lat_bins = np.linspace(df["Lat"].min(), df["Lat"].max(), grid_size)
+lon_bins = np.linspace(df["Lon"].min(), df["Lon"].max(), grid_size)
+
+df["lat_bin"] = np.clip(np.digitize(df["Lat"], lat_bins) - 1, 0, grid_size - 2)
+df["lon_bin"] = np.clip(np.digitize(df["Lon"], lon_bins) - 1, 0, grid_size - 2)
+
+agg_data = df.groupby(["lat_bin", "lon_bin"]).agg({
+    "Vertical_velocity": "mean",
+    "Temperature": "mean",
+    "Pressure": "mean",
+    "Salinity": "mean",
+    "D": "sum",
+    "A": "sum",
+    "B": "sum",
+    "X20Hz": "sum",
+    "X40Hz": "sum"
+}).reset_index()
+
+heatmap_feature = "Pressure"
+
+if agg_data[heatmap_feature].isnull().all():
+    print(f"Warning: {heatmap_feature} contains only NaN values! Please check the data.")
+else:
+    heatmap = np.full((grid_size-1, grid_size-1), np.nan)
+    for _, row in agg_data.iterrows():
+        heatmap[int(row["lat_bin"]), int(row["lon_bin"])] = row[heatmap_feature]
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    sns.heatmap(
+        heatmap, cmap="plasma", annot=False, xticklabels=False, yticklabels=False,
+        cbar=True, ax=ax, linewidths=0.1, linecolor="gray", square=True, robust=True
+    )
+
+    for _, row in agg_data.iterrows():
+        lon_idx, lat_idx = int(row["lon_bin"]), int(row["lat_bin"])
+        if lon_idx < grid_size - 1 and lat_idx < grid_size - 1:
+            label = (
+                f"D:{int(row['D']) if not np.isnan(row['D']) else 0} "
+                f"A:{int(row['A']) if not np.isnan(row['A']) else 0} "
+                f"B:{int(row['B']) if not np.isnan(row['B']) else 0}\n"
+                f"20Hz:{int(row['X20Hz']) if not np.isnan(row['X20Hz']) else 0} "
+                f"40Hz:{int(row['X40Hz']) if not np.isnan(row['X40Hz']) else 0}"
+            )
+            ax.text(
+                lon_idx + 0.5, lat_idx + 0.5, label, fontsize=4, ha='center', va='center',
+                color='white', bbox=dict(facecolor='black', alpha=0.5, edgecolor='none')
+            )
+
+    ax.set_xlabel("Longitude Grid", fontsize=8)
+    ax.set_ylabel("Latitude Grid", fontsize=8)
+    ax.set_title(f"Grid Heatmap of {heatmap_feature} with Whale Data Overlay", fontsize=14, fontweight="bold")
+
+    plt.show()
+
+```
+
+Whales prefer deep, low-pressure areas, while shallow, high-pressure areas have fewer detections. This matches what we expect since many whales live and communicate in deep waters!
+
+```{python, fig.width=5, fig.height=4}
+grid_size = 15
+
+lat_bins = np.linspace(df["Lat"].min(), df["Lat"].max(), grid_size)
+lon_bins = np.linspace(df["Lon"].min(), df["Lon"].max(), grid_size)
+
+df["lat_bin"] = np.clip(np.digitize(df["Lat"], lat_bins) - 1, 0, grid_size - 2)
+df["lon_bin"] = np.clip(np.digitize(df["Lon"], lon_bins) - 1, 0, grid_size - 2)
+
+agg_data = df.groupby(["lat_bin", "lon_bin"]).agg({
+    "Vertical_velocity": "mean",
+    "Meridional_velocity": "mean",
+    "Zonal_velocity": "mean",
+    "Temperature": "mean",
+    "Pressure": "mean",
+    "Salinity": "mean",
+    "D": "sum",
+    "A": "sum",
+    "B": "sum",
+    "X20Hz": "sum",
+    "X40Hz": "sum"
+}).reset_index()
+
+heatmap_feature = "Meridional_velocity"
+
+if agg_data[heatmap_feature].isnull().all():
+    print(f"Warning: {heatmap_feature} contains only NaN values! Please check the data.")
+else:
+    heatmap = np.full((grid_size-1, grid_size-1), np.nan)
+    for _, row in agg_data.iterrows():
+        heatmap[int(row["lat_bin"]), int(row["lon_bin"])] = row[heatmap_feature]
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    sns.heatmap(
+        heatmap, cmap="coolwarm", annot=False, xticklabels=False, yticklabels=False,
+        cbar=True, ax=ax, linewidths=0.1, linecolor="gray", square=True, robust=True
+    )
+
+    for _, row in agg_data.iterrows():
+        lon_idx, lat_idx = int(row["lon_bin"]), int(row["lat_bin"])
+        if lon_idx < grid_size - 1 and lat_idx < grid_size - 1:
+            label = (
+                f"D:{int(row['D']) if not np.isnan(row['D']) else 0} "
+                f"A:{int(row['A']) if not np.isnan(row['A']) else 0} "
+                f"B:{int(row['B']) if not np.isnan(row['B']) else 0}\n"
+                f"20Hz:{int(row['X20Hz']) if not np.isnan(row['X20Hz']) else 0} "
+                f"40Hz:{int(row['X40Hz']) if not np.isnan(row['X40Hz']) else 0}"
+            )
+            ax.text(
+                lon_idx + 0.5, lat_idx + 0.5, label, fontsize=4, ha='center', va='center',
+                color='white', bbox=dict(facecolor='black', alpha=0.5, edgecolor='none')
+            )
+
+    ax.set_xlabel("Longitude Grid", fontsize=8)
+    ax.set_ylabel("Latitude Grid", fontsize=8)
+    ax.set_title(f"Grid Heatmap of {heatmap_feature} with Whale Data Overlay", fontsize=14, fontweight="bold")
+
+    plt.show()
+    
+```
+
+There is no strong correlation between meridional velocity and whale call density, suggesting that north-south currents do not significantly impact whale presence or calling behavior.
+
+```{python, fig.width=5, fig.height=4}
+grid_size = 15
+
+lat_bins = np.linspace(df["Lat"].min(), df["Lat"].max(), grid_size)
+lon_bins = np.linspace(df["Lon"].min(), df["Lon"].max(), grid_size)
+
+df["lat_bin"] = np.clip(np.digitize(df["Lat"], lat_bins) - 1, 0, grid_size - 2)
+df["lon_bin"] = np.clip(np.digitize(df["Lon"], lon_bins) - 1, 0, grid_size - 2)
+
+agg_data = df.groupby(["lat_bin", "lon_bin"]).agg({
+    "Vertical_velocity": "mean",
+    "Meridional_velocity": "mean",
+    "Zonal_velocity": "mean",
+    "Temperature": "mean",
+    "Pressure": "mean",
+    "Salinity": "mean",
+    "D": "sum",
+    "A": "sum",
+    "B": "sum",
+    "X20Hz": "sum",
+    "X40Hz": "sum"
+}).reset_index()
+
+heatmap_feature = "Zonal_velocity"
+
+if agg_data[heatmap_feature].isnull().all():
+    print(f"Warning: {heatmap_feature} contains only NaN values! Please check the data.")
+else:
+    heatmap = np.full((grid_size-1, grid_size-1), np.nan)
+    for _, row in agg_data.iterrows():
+        heatmap[int(row["lat_bin"]), int(row["lon_bin"])] = row[heatmap_feature]
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    sns.heatmap(
+        heatmap, cmap="coolwarm", annot=False, xticklabels=False, yticklabels=False,
+        cbar=True, ax=ax, linewidths=0.1, linecolor="gray", square=True, robust=True
+    )
+
+    for _, row in agg_data.iterrows():
+        lon_idx, lat_idx = int(row["lon_bin"]), int(row["lat_bin"])
+        if lon_idx < grid_size - 1 and lat_idx < grid_size - 1:
+            label = (
+                f"D:{int(row['D']) if not np.isnan(row['D']) else 0} "
+                f"A:{int(row['A']) if not np.isnan(row['A']) else 0} "
+                f"B:{int(row['B']) if not np.isnan(row['B']) else 0}\n"
+                f"20Hz:{int(row['X20Hz']) if not np.isnan(row['X20Hz']) else 0} "
+                f"40Hz:{int(row['X40Hz']) if not np.isnan(row['X40Hz']) else 0}"
+            )
+            ax.text(
+                lon_idx + 0.5, lat_idx + 0.5, label, fontsize=4, ha='center', va='center',
+                color='white', bbox=dict(facecolor='black', alpha=0.5, edgecolor='none')
+            )
+
+    ax.set_xlabel("Longitude Grid", fontsize=8)
+    ax.set_ylabel("Latitude Grid", fontsize=8)
+    ax.set_title(f"Grid Heatmap of {heatmap_feature} with Whale Data Overlay", fontsize=14, fontweight="bold")
+
+    plt.show()
+```
+
+Whales do not seem to favor eastward or westward currents, meaning zonal velocity alone is not a major factor in their movement.
+
+```{python, fig.width=5, fig.height=4}
+grid_size = 15
+
+lat_bins = np.linspace(df["Lat"].min(), df["Lat"].max(), grid_size)
+lon_bins = np.linspace(df["Lon"].min(), df["Lon"].max(), grid_size)
+
+df["lat_bin"] = np.clip(np.digitize(df["Lat"], lat_bins) - 1, 0, grid_size - 2)
+df["lon_bin"] = np.clip(np.digitize(df["Lon"], lon_bins) - 1, 0, grid_size - 2)
+
+agg_data = df.groupby(["lat_bin", "lon_bin"]).agg({
+    "Vertical_velocity": "mean",
+    "Meridional_velocity": "mean",
+    "Zonal_velocity": "mean",
+    "Temperature": "mean",
+    "Pressure": "mean",
+    "Salinity": "mean",
+    "D": "sum",
+    "A": "sum",
+    "B": "sum",
+    "X20Hz": "sum",
+    "X40Hz": "sum"
+}).reset_index()
+
+heatmap_feature = "Zonal_velocity"
+
+if agg_data[heatmap_feature].isnull().all():
+    print(f"Warning: {heatmap_feature} contains only NaN values! Please check the data.")
+else:
+    heatmap = np.full((grid_size-1, grid_size-1), np.nan)
+    for _, row in agg_data.iterrows():
+        heatmap[int(row["lat_bin"]), int(row["lon_bin"])] = row[heatmap_feature]
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    sns.heatmap(
+        heatmap, cmap="coolwarm", annot=False, xticklabels=False, yticklabels=False,
+        cbar=True, ax=ax, linewidths=0.1, linecolor="gray", square=True, robust=True
+    )
+
+    for _, row in agg_data.iterrows():
+        lon_idx, lat_idx = int(row["lon_bin"]), int(row["lat_bin"])
+        if lon_idx < grid_size - 1 and lat_idx < grid_size - 1:
+            label = (
+                f"D:{int(row['D']) if not np.isnan(row['D']) else 0} "
+                f"A:{int(row['A']) if not np.isnan(row['A']) else 0} "
+                f"B:{int(row['B']) if not np.isnan(row['B']) else 0}\n"
+                f"20Hz:{int(row['X20Hz']) if not np.isnan(row['X20Hz']) else 0} "
+                f"40Hz:{int(row['X40Hz']) if not np.isnan(row['X40Hz']) else 0}"
+            )
+            ax.text(
+                lon_idx + 0.5, lat_idx + 0.5, label, fontsize=4, ha='center', va='center',
+                color='white', bbox=dict(facecolor='black', alpha=0.5, edgecolor='none')
+            )
+
+    ax.set_xlabel("Longitude Grid", fontsize=8)
+    ax.set_ylabel("Latitude Grid", fontsize=8)
+    ax.set_title(f"Grid Heatmap of {heatmap_feature} with Whale Data Overlay", fontsize=14, fontweight="bold")
+
+    plt.show()
+```
+
+Whales are present in areas with both eastward and westward currents, so zonal velocity might not be a major factor in their movement or calling behavior.
+
+```{python, fig.width=4, fig.height=4}
+predictors = ["Temperature", "Pressure", "Salinity", "Meridional_velocity",
+"Vertical_velocity", "Zonal_velocity"]
+responses = ["D", "A", "B", "X20Hz", "X40Hz"]
+colors = ["blue", "green", "red", "purple", "orange", "pink", "brown"]
+response_colors = dict(zip(responses, colors))
+
+fig, axes = plt.subplots(len(responses), len(predictors), figsize=(16, 12), sharex='col', sharey='row')
+
+for i, response in enumerate(responses):
+    for j, predictor in enumerate(predictors):
+        ax = axes[i, j]
+        sns.scatterplot(data=df, x=predictor, y=response, alpha=0.6, ax=ax, color=response_colors[response])
+        ax.set_xlabel(predictor if i == len(responses) - 1 else "", fontsize=6)
+        ax.set_ylabel(response if j == 0 else "", fontsize=6)
+        ax.set_title(f"{response} vs {predictor}", fontsize=6)
+
+plt.tight_layout()
+plt.show()
+```
+
+Depth and pressure show a strong correlation with whale detections, meaning whales favor deep sea environments.
+
+Temperature and salinity do not show strong trends, implying that they do not significantly impact whale call activity.

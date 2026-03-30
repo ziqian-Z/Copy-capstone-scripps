@@ -1,0 +1,195 @@
+---
+title: ""
+author: ""
+date: ""
+output:
+  pdf_document:
+    number_sections: yes
+---
+
+\vspace*{\fill}
+
+\begin{center}
+\Huge \textbf{Modeling Cetacean Distribution Patterns Using Spatial-Temporal GLMMs} \\[0.5cm]
+\large By Joshua Charfauros, Justin Lang, Peter Xiong, Valerie De La Fuente, Ziqian Zhao, Samantha Su \\[0.2cm]
+\normalsize Sponsor: Michaela Alksne, Scripps Institute of Oceanography.\\
+\normalsize Mentor: Professor Baracaldo
+```{r whale_img, echo=FALSE, out.width='80%', fig.align='center'}
+knitr::include_graphics("/Users/sammysu/Downloads/whale_dolphin.png")
+```
+\end{center}
+\vspace*{\fill}
+\thispagestyle{empty}
+\newpage
+
+# Introduction
+
+Researching the presence of blue and fin whales and their reliance on distinct call types for behaviors (such as foraging and reproduction) is important for monitoring ecosystem health and guiding conservation efforts in the California Current System. By analyzing their calls in relation with environmental data, we can gain insight into their behavioral patterns and habitat use across time.
+
+Several foundational studies guided our research by providing us a solid background understanding on our topic. For example, Becker et al. (2022) studied how different whale species use habitat across the California Current and showed that it's important to use flexible models that can account for changes in space and time. Campbell et al. (2015) showed that there were long-term trends in whale sightings using CalCOFI visual survey data, while Oleson et al. (2007) and Širović et al. (2013) demonstrated that specific whale call types correlate with behavioral states, supporting our decision to model each call type separately.
+
+Therefore, the goal of this project is to develop species distribution models for blue and fin whale acoustic presence using environmental drivers, and to visualize their occurrence across time. We also aim to interpret call-type-specific patterns to better understand behavioral ecology.
+
+**Github:** All work will be documented in the following GitHub repository:\
+<https://github.com/Capstone-24-25/capstone-scripps>
+
+# Problem(s) of Interest
+
+The primary problem we want to address is how environmental conditions affect the acoustic presence of blue and fin whales in the Southern California Bight. We will focus on modeling this presence across time using call type data to better understand how different behaviors (such as feeding vs. mating) are distributed in relation to the environment.
+
+A second core problem is identifying how specific whale call types (A, B, D, 20 Hz, 40 Hz) reflect distinct behavioral states. By visualizing, animating, and modeling each call type, we hope to develop inferences on patterns related to foraging or reproductive behavior and explore how these patterns change seasonally and geographically.
+
+# Materials and Methods
+
+## Datasets
+
+### CASE-STSE
+
+The CASE-STSE dataset collects oceanographic data over one- to three-month periods to generate detailed analyses and 30-day forecasts of ocean conditions. It includes observations from various sources, including underwater gliders, temperature probes, floating sensors, and satellites. The dataset includes three-dimensional fields of temperature, salinity, pressure, and velocity, making it a valuable resource for understanding dynamic ocean processes. More information and data products can be accessed at <https://ecco.ucsd.edu/case_stse_results1.html>.
+
+### CalCoFI
+
+The CalCoFI dataset contains data on whale detection across survey stations, comprising of visual surveys, acoustic recordings, and environmental DNA detections. The resulting data includes the number of individual calls and their types (or response variables), such as A, B, and D calls for blue whales, and A, B, D, 20 Hz and 40 Hz calls for fin whales. These response variables will tell us how environmental variables affects different whales/each individual call. Prior to conducting our project, we conducted exploratory data analysis to better understand this dataset.
+
+```{r density_heatmap, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics("/Users/sammysu/Downloads/density_heatmap.png")
+```
+
+```{r marine_mammal_detections, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics("/Users/sammysu/Downloads/Marine_Mammal_detections.png")
+```
+
+## Data Wrangling Processing Techniques
+
+Before modeling, we combined acoustic data from CalCOFI with environmental data from CASE-STSE to relate whale acoustic presence to environmental drivers across space and time in the Southern California Bight. We adapted a provided MATLAB script to extract relevant CASE-STSE variables, then computed cruise averages for each day with acoustic data, resulting in a dataset indexed by year and month.
+
+**Merging Procedure:**
+
+- Temporal matching: We joined CalCOFI and CASE-STSE records using the common year-month field.
+
+- Spatial matching: For each CalCOFI record, we identified the closest CASE-STSE grid cell using K-nearest neighbors on lattitude and longitude coordinates.
+
+## Animations and Visualizations
+
+Michaela Alksne provided us with a MATLAB script that would plot our extracted environmental data and show the difference over time. We adapted this script in order to show the call types over these data in a form of animated visualization, giving us a better understanding of our data prior to modeling.
+
+To do this, we graphed the call types over environmental data at specific depths. At each specific depth and date, we parsed through the matching CSV using a custom function which converted the csv into numerical matrices. Then, as a base layer for water velocity, used MATLAB's quiver function to properly visualize how water flows throughout certain latitudes. 
+
+Then, we plotted different colored dots for each call type over these environmental data and increased the size of the dots based on how long the calls were. This allowed us to visualize how different call types appear across space and time, and how they relate to environmental conditions. We also set a predetermined color for each call so that we can show them on a legend to the right.
+
+Finally, we set all these collapsed images into one singular frame and binded all of them together through rgb2ind to create our finished gif representing the whale calls overlayed on different environmental data at different depths. 
+
+## Statistical Modeling
+
+We modeled fin and blue whale acoustic presence using two statistical frameworks: a **tweedie generalized linear model (GLM)** (Appropriate for continuous data with a large number of zeros (zero-inflated)) and a **delta-gamma hurdle model** (Separately models the probability of presence and the magnitude of response when present), both implemented using predictor (written by Jim Thorson, a collaborator on this project). The response variable, fin_resp, was constructed as the sum of 20 Hz and 40 Hz fin whale call rates, representing total acoustic activity.
+
+### Predictor Selection
+
+- We applied **forward stepwise selection** (AIC-based) to identify an optimal set of predictors from a pool of standardized environmental variables, including:
+  - Estimated depth
+  - Temperature and salinity at multiple depths
+  - Current velocity magnitude and direction
+  - Larvae abundance
+  
+This helped us figure out which factors are most important for predicting whale presence, and also made it easier to draw inferences about how each variable might be influencing their behavior.
+
+### Pre-modeling Steps
+
+- **Imputed missing values** in environmental predictors using K-nearest neighbors (KNN) to find the nearest (or second-nearest) available non-missing value, allowing retention of more samples for modeling.
+- **Tested for autocorrelation** in the response using ACF and PACF plots.
+- **Split the data temporally**:
+  - Training set: all years except the most recent
+  - Test set: most recent year (to assess temporal generalization)
+
+### Model Fitting
+
+- Both models were fit with:
+  - A **spatiotemporal random effect** over season (`spatiotemporal = "iid"`)
+  - A **spatial mesh** created from geographic coordinates (`X`, `Y`)
+- Parameters were estimated using **maximum likelihood** via sdmTMB.
+
+### Model Evaluation
+
+- Performance was assessed by:
+  - **Predicted vs. observed plots** for both training and test data
+  - **Root mean squared error (RMSE)**
+  - Summary statistics (range and standard deviation of residuals)
+
+This modeling framework enabled us to capture non-linear relationships and spatiotemporal structure in fin and blue whale calling behavior across oceanographic gradients.
+
+# Preliminary Findings
+
+Here are some graphs demonstrating the relationship between predictors and response with ggplot:
+
+![ggplot Fin Whale Response VS. Predictors.](ggplotEDA.png){width=80%}
+Using Generalized Additive Model(GAM) to explore the relationship. Here are some examples below. This is just for a visualized reference, eventually, we will use variable selection methods (forward step-wise) to select our final predictors. 
+
+![GAM Fin Whale Response VS. Estimated Depth](est.png){width=70%}
+    
+![GAM Fin Whale Response VS. Temperature](temp_55.png){width=70%} 
+
+![GAM Fin Whale Response VS. Velocity](magnitude.png){width=70%}
+The GAM plots below reveal clear **non-linear relationships** between predictors and whale call activity, supporting the use of flexible model structures (e.g., Tweedie or delta-gamma families) in downstream SDM modeling.
+
+
+![Call types overlayed on environmental data](gif.png){width=80%}
+                                 Through our animations, we were not able to determine anything visually significant for temperature and salinity across the specified depths. However, we were able to find a hint about where the whale calls are in terms of water currents. A majority of the dots which signify how much effort was recorded, was in the white curves of the graphs. This represents places in which two different currents are meeting, which gave us insight into whales' behavior of where to reside and may show the importance of how the water velocity afffects whale location.
+
+Modeling with the tweedie distribution yielded the following training and testing plots: 
+
+![Tweedie Model Training](train_plot.png){width=50%}
+![Tweedie Model Training](test_plot.png){width=50%}
+Which resulted in a training RMSE of 31.76, a minimum difference of 0 between estimated and predicted values, a maximum difference of 389.22, and a standard deviation of 31.63. The testing RMSE was 101.19, a minimum difference of 0, a maximum difference of 728.09 and a standard deviation of 99.43.
+
+We also fit a Delta Gamma model with yielded the following training and testing plots:
+
+
+
+
+![Delta Gamma Model Training](DG_train_plot.png){width=50%}
+![Delta Gamma Model Testing](DG_test_plot.png){width=50%}
+
+Which resulted in a training RMSE of 14.42, a minimum difference of 0 between estimated and predicted values, a maximum difference of 389.22, and a standard deviation of 31.63. The testing RMSE was 100.60, a minimum difference of 0, a maximum difference of 728.09 and a standard deviation of 99.43.
+
+Interestingly enough, the only difference between these models' metrics are the RMSE. Both versions have matching maximum and minimum differences as well as standard deviations. Admittedly, these models don't do a fantastic job of prediction. With so many of our responses being that no whales were observed (fin_resp = 0), our models heavily overfit toward 0. We even see in our Tweedie model that at times, the model is predicting negative values. Clearly this cannot be, since there's no such thing as a negative whale. In the future we hope to find a way to not overfit so drastically towards 0, but have yet to discover a solution.
+
+# Discussion
+
+One of the main challenges we faced was dealing with missing environmental data. Many variables had non-random gaps, and simply dropping rows with missing values would have resulted in a major loss of information. Initially, we considered using spatial interpolation (kriging), but ultimately, we applied a simpler method: using K-nearest neighbors (KNN) to find the nearest (or second-nearest) available non-missing value. It’s unclear why missing values appeared during the extraction process from the CASE-STSE website, but this approach allowed us to retain more data while maintaining consistency for modeling.
+
+Another major issue came up when we started fitting our models: we ran into computational singularities, which essentially means the model couldn't run properly because some variables were too similar to each other. Specifically, we found that environmental predictors like salinity at 55 m and 280 m depths were often perfectly correlated. This kind of high collinearity makes it hard for the model to estimate the individual effect of each variable. To solve this, we created a correlation matrix to visualize the relationships between environmental factors and removed any variables that were highly correlated. We then used forward stepwise selection to choose a cleaner set of predictors that wouldn't cause singularities.
+
+```{r Correlation_matrix, echo=FALSE, out.width='80%', fig.align='center'}
+knitr::include_graphics("/Users/sammysu/Downloads/Correlation_matrix.png")
+```
+
+We selected the following variables for modeling:
+
+- `est_depth_std`
+- `temperature_depth_55_std`
+- `temperature_depth_105_std`
+- `temperature_depth_280_std`
+- `salinity_depth_55_std`
+- `salinity_depth_105_std`
+- `magnitude_depth_55_std`
+- `magnitude_depth_105_std`
+- `theta_depth_55_std`
+- `theta_depth_105_std`
+- `larvae_count_std`
+
+> Note: `_std` indicates that the variable has been **standardized** (mean-centered and scaled to unit variance).
+
+Our results from both the tweedie and delta-gamma models showed that the relationship between environmental factors and fin whale call rates isn’t linear. Factors like depth, temperature, and current strength seemed to have strong associations with whale calling behavior, which supports our original idea that environmental conditions help explain when and where whales are vocalizing.
+
+Finally, we tested our models using the most recent year of data as a test set. The model did a decent job, but its performance was slightly worse on the test set compared to the training set, which suggests a bit of overfitting. In the future, we could address this by adding regularization or trying out different ways to validate the model.
+
+# Future Work
+
+In the spring quarter, we plan to build on the foundational work completed during winter by focusing on completing the three goals that our sponsor requested of us.
+
+First, we will test whether our tweedie distribution and delta-gamma distribution models give better performance, and compare models built with all call types combined versus models that separate call types. We will continue to refine predictor selection by evaluating variables and investigating trends. This helps us with inference and understanding how each predictor affects whale presence.
+
+Second, we will improve our visualizations and draw interpretations, creating animated maps that overlay whale acoustic presence with environmental variables, as well as Histograms/scatter plots/x-y plots to display the relationships of model-predicted whale call density across time.
+
+Finally, we will begin preparing all project deliverables. This includes cleaning and documenting the GitHub repository for reproducibility, designing a poster, and preparing a short presentation for the showcase--all of which communicates our thoughts on when, where, and why blue and fin whales are acoustically present in the Southern California Bight.
+

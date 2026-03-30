@@ -1,0 +1,135 @@
+---
+title: "EDA"
+author: "Peter Xiong"
+date: "2025-03-14"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(ggOceanMaps)
+library(rnaturalearth)
+library(ggplot2)
+library(gganimate)
+```
+
+# Data merging
+
+```{r}
+# Define the path to your data directory
+data_directory <- "D:/Desktop/PSTAT 197B/scripps/capstone-scripps/data/Specificdate/Temperature"
+
+# List all CSV files
+file_paths <- list.files(path = data_directory, pattern = "\\.csv$", full.names = TRUE)
+
+# Randomly choose 100 file names from this list for testing
+set.seed(123)
+selected_files <- sample(file_paths, size = 100)
+
+# Function to read and process each file
+process_file <- function(file_path) {
+  data <- read_csv(file_path)
+  
+  # Extract date and depth from the filename
+  date_part <- sub(".*_date_(\\d{4}-\\d{2}-\\d{2})\\.csv", "\\1", basename(file_path))
+  depth_part <- str_extract(basename(file_path), "-\\d+\\.")
+  depth <- as.numeric(str_remove(depth_part, "\\D"))
+  date <- as.Date(date_part, format = "%Y-%m-%d")
+  
+  # Reshape data assuming the first column is 'Row' which contains longitude, other columns are latitudes
+  data_long <- pivot_longer(data, 
+                            cols = -Row, 
+                            names_to = "Latitude", 
+                            values_to = "Temperature")
+  
+  # Convert the 'Row' column to just a longitude identifier
+  data_long$Longitude <- str_remove(data_long$Row, "Lon_")
+  data_long$Latitude <- str_remove(data_long$Latitude, "Lat_")
+  data_long$Date <- date
+  data_long$Depth <- depth
+  
+  # Ensure columns are correctly typed
+  data_long$Longitude <- as.numeric(data_long$Longitude)
+  data_long$Latitude <- as.numeric(data_long$Latitude)
+  
+  # Adjust longitude from 0-360 to -180 to 180 if necessary
+  data_long$Longitude <- ifelse(data_long$Longitude > 180, data_long$Longitude - 360, data_long$Longitude)
+  
+  return(data_long)
+}
+
+# Process all files and combine into a single dataframe
+all_data <- bind_rows(lapply(selected_files, process_file))
+
+# Inspect
+head(all_data)
+```
+
+# Plot the oceanmaps
+
+```{r}
+# Calculate bounding box from your data
+lon_range <- range(all_data$Longitude, na.rm = TRUE)
+lat_range <- range(all_data$Latitude, na.rm = TRUE)
+
+# basemap() expects a vector in the order c(xmin, xmax, ymin, ymax)
+my_limits <- c(lon_range[1], lon_range[2], lat_range[1], lat_range[2])
+
+coastline_sf <- ne_coastline(scale = "medium", returnclass = "sf")
+
+static_plot <- basemap(
+  limits = my_limits,  
+  shapefiles = list(land = coastline_sf),
+  bathymetry = FALSE
+) +
+  geom_point(
+    data = all_data,
+    aes(
+      x = Longitude,
+      y = Latitude,
+      color = Temperature
+    ),
+    size = 2
+  ) +
+  facet_wrap(~ Depth) +
+  scale_color_viridis_c() +
+  labs(
+    title = "Ocean Temperature Observations",
+    color = "Temp (°C)",
+    x = "Longitude",
+    y = "Latitude"
+  )
+
+# Print static map
+static_plot
+```
+
+
+# Animate maps
+
+```{r}
+animated_plot <- static_plot +
+  transition_time(all_data$Date) +
+  labs(
+    title = "Ocean Temperature: {frame_time}"
+  )
+
+# Render the animation in the RStudio Viewer
+#animated_map <- animate(
+#  animated_plot,
+#  nframes = 50,  # total frames (adjust as desired)
+#  fps = 5,       # frames per second
+#  width = 800,
+#  height = 500,
+#)
+
+#animated_map
+
+# Save as a GIF
+# anim_save("ocean_temp_animation.gif", animation = animated_map)
+```
+
+
+

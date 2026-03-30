@@ -1,0 +1,60 @@
+---
+title: "Modeling Blue Whale A Call Distribution Using Spatiotemporal GLMMs"
+author: "Valerie De La Fuente"
+date: "2025-06-04"
+class: "UC Santa Barbara Data Science Capstone"
+output:
+  pdf_document: 
+---
+
+## Abstract
+
+This project applies spatiotemporal generalized linear mixed models (GLMMs) to predict the acoustic presence of blue whales (A, B, and D calls) and fin whales (20 Hz and 40 Hz) in the Southern California Bight using environmental data. My primary role in this project was to explore and model blue whale A call presence. A calls are linked to year-round reproductive behavior, making their accurate prediction essential for understanding blue whale life history and informing conservation efforts. I developed and tested multiple models using the `sdmTMB` R package, ultimately identifying a formulation that best balanced predictive performance and ecological interpretability. The final model—`a_scaled ~ temperature_depth_55 + lat + lon`—achieved the lowest test root mean square error (RMSE = 1.9812) while highlighting areas of predicted activity that aligned with some spatial patterns of observed calls. However, temporal mismatches and poor prediction of hotspots suggest the presence of missing ecological drivers or the limitations of the sparse, zero-inflated dataset.
+
+## My Role and Contributions
+
+I led the modeling and evaluation of blue whale A call distributions as a key component of our team’s broader investigation into cetacean acoustic patterns. My responsibilities included:
+
+-   Contributing to the data prepossessing and merging subteam, including cleaning the acoustic and environmental datasets and integrating them spatially and temporally using latitude, longitude, and cruise date information.
+
+-   Conducting exploratory data analysis (EDA) on A call acoustic detections and environmental variables (e.g., temperature, salinity, ocean velocity) at three depth bins (55m, 105m, 280m).
+
+-   Designing and implementing spatiotemporal GLMMs using `sdmTMB`, including mesh construction, parameter tuning (`spatial = "on"`, `spatiotemporal = "rw"`), and model selection based on RMSE.
+
+-   Developing the training mesh by projecting geographic coordinates to a planar system and optimizing the cutoff value for model performance.
+
+-   Evaluating model outputs using RMSE and residual standard deviation, as well as qualitative comparisons of predicted vs. observed detection maps.
+
+-   Interpreting results with ecological context, identifying potential shortcomings due to zero-inflation, sparse detections, and insufficient environmental covariates.
+
+-   Organizing and facilitating team meetings, including setting agendas, leading discussions on model development and results interpretation, and ensuring project milestones were met collaboratively.
+
+## Key Findings
+
+-   **Best-performing model**: GLMM with temperature at 55m depth and spatial terms (lat/lon), yielding a test RMSE = 1.9812 and test standard deviation = 2.1372.
+
+-   **Temporal mismatch**: Model predicted summer peaks, while actual A call detections peaked in the fall.
+
+-   **Spatial mismatch**: Predicted hotspots were slightly south of observed detection areas.
+
+-   **Conclusion**: Environmental predictors alone were insufficient to explain A call presence. The low RMSE masked poor predictive alignment, indicating that A calls are influenced by unmeasured ecological drivers or require a denser dataset.
+
+## Supplemental Materials
+
+Github repository contributions included:
+
+-   `enviro_data_average/:` Contributed to the development of scripts that use regular expressions to extract depth bin and date metadata from CASE-STSE filenames. Environmental variables were then grouped and averaged by month/year and depth. Resulting matrices were saved to CSV files.
+
+-   `calcofi_cleaning.R`: Assisted in writing this script to preprocess and clean the CalCOFI acoustic dataset. The script outputs a cleaned CSV file.
+
+-   `calcofi_cleaned_05_12_25.csv`: The cleaned and preprocessed CalCOFI CSV file, prepped for merging with environmental data.
+
+-   `merged_feature_engineering.R`: Led the creation of this script by compiling and organizing team-developed code. This script adds necessary variables to the merged CalCOFI and CASE-STSE dataset. Variables are also standardized for modeling.
+
+-   `merged_std_data_05_13_25.csv`: The final merged CalCOFI and CASE-STSE CSV file. This standardized dataset was used for all modeling.
+
+-   `A Call Final Report/`: Created a comprehensive markdown report of exploratory data analysis, modeling, and conclusions for A calls, including a rendered HTML file and subfolders with model outputs and plots.
+
+-   `Final_Deliverable.Rmd`: Contributed a code chunk to this team summary file, which includes the best models for each call type. My section includes the optimized mesh and final model for the A call response variable.
+
+-   `a_call/`: Folder containing all scripts and files related to my A call modeling work. Includes `a_call.Rmd` with all exploratory analysis, model testing, and evaluation, along with relevant subdirectories for plots and model results.

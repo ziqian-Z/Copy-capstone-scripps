@@ -1,0 +1,134 @@
+---
+title: "Josh & Sam Ocean Maps"
+output: html_document
+date: "2025-03-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Sam Read This
+
+ggoceanmaps works very similarly to ggplot, it essentially adds layers on top of one another to your liking. basemap() creates the base map to build upon, and the limits argument is just the max lat and long for our given area (for now i have it as the max and min of each but its hardcoded) If you look at data_long, ive created a 3 column data frame that has lat, long, and salinity at that coordinate, I also made a levels column to essentially create bins for each level but that was using ggplot, and i think basemap with ggoceanmaps is better, so ignore levels for now.
+
+This is only mapping the salinity for july 19 2021, Michaelas visuals were a movie that iterates through different dates' salinity maps, apparently we can do a similar thing using gganimate, but idrk how that works.
+
+I asked chat ab gganimate and this is what it gave me:
+
+```{r, eval = FALSE}
+library(ggplot2)
+library(gganimate)
+library(ggOceanMaps)
+
+# Create base map
+p <- basemap(limits = c(-130, -110, 28, 45)) +
+  geom_point(data = data_long, aes(x = Longitude, y = Latitude, color = Salinity), size = 2) +
+  scale_color_viridis_c(option = "plasma") +
+  labs(title = "Salinity Levels Over Time", x = "Longitude", y = "Latitude", color = "Salinity") +
+  transition_time(Time) +  # Animate by time
+  ease_aes('linear')  # Smooth transitions
+
+# Save as GIF
+animate(p, renderer = gifski_renderer("salinity_animation.gif"))
+
+```
+
+transition_time() apparently is how it changes frames, and chat says it "animates a ggplot over a continuous variable" so one approach we could try is getting every day that we want to animate over into 1 data frame and then having like a "day" column that transition_time() can iterate over? 
+
+```{r, echo = FALSE}
+library(ggplot2)
+library(ggOceanMaps)
+library(tidyr)
+library(dplyr)
+library(maps)
+library(viridis)
+library(ggmap)
+```
+
+```{r}
+data <- read.csv("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_19-Jul-2021.csv")
+
+data$Row <- gsub("^Lon_", "", data$Row)
+
+colnames(data)[1] <- "Longitude"
+
+for (col in colnames(data)){
+  if (startsWith(col, "Lat_")){
+    colnames(data) <- gsub("^Lat_","",colnames(data))
+  }
+}
+
+data_long <- data %>%
+  pivot_longer(cols = -Longitude, names_to = "Latitude", values_to = "Salinity") %>% mutate(Longitude = as.numeric(Longitude)) %>% mutate(Latitude = as.numeric(Latitude))%>% mutate(Salinity = as.numeric(Salinity))
+
+data_long <- data_long %>% 
+  mutate(Longitude = Longitude - 360)
+
+data_long <- data_long[!is.na(data_long$Salinity) & is.finite(data_long$Salinity), ]
+
+data_long$level <- cut(data_long$Salinity, breaks = seq(min(data_long$Salinity), max(data_long$Salinity), by = ((max(data_long$Salinity) - min(data_long$Salinity)) / 4)), labels = c("Low", "Moderate", "High", "Very High"), right = FALSE)
+
+#View(data_long)
+```
+
+
+```{r}
+basemap(limits = c(233.0312 - 360, 244.9688 - 360, 29.0438, 38.9813), bathymetry = FALSE) +
+  geom_tile(data = data_long, aes(x = Longitude, y = Latitude, fill = Salinity)) +
+  scale_fill_viridis_c(name = "Salinity") +
+  labs(x = "Longitude", y = "Latitude", title = "Salinity Distribution Off California Coast")
+```
+
+Sam's heatmap
+
+```{r}
+library(maps)
+library(ggmap)
+calcofi_data <- read.csv("/Users/josh/Documents/GitHub/capstone-scripps/data/combined/combined_data.csv")
+
+world_map<-map_data("world")
+usa_map<-subset(world_map, region == "USA")
+ggplot()+geom_polygon(data = usa_map, aes(x = long, y = lat, group = group), 
+               fill = "gray90", color = "black") +  
+  stat_density_2d(data = calcofi_data, aes(x = Lon, y = Lat, fill = ..level..), geom = "polygon", alpha = 0.5) +
+  scale_fill_viridis_c(option = "plasma") + 
+  labs(title = "Marine Mammal Density Heatmap: California",
+       x = "Longitude", y = "Latitude", fill = "Density") +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(28, 45)) +
+  theme_minimal()
+```
+
+```{r}
+usa_map <- map_data("state")
+ca_map <- subset(usa_map, region == "california")
+
+ggplot() +
+  geom_polygon(data = ca_map, aes(x = long, y = lat, group = group), fill = "gray90", color = "black") + 
+  geom_point(data = data_long, aes(x = Longitude, y = Latitude, color = level), size = 2, alpha = 0.8) + 
+  scale_color_manual(values = c("Low" = "blue", "Moderate" = "green","High" = "yellow", "Very High" = "red")) + 
+  labs(title = "Salinity on California Coast", x = "Longitude", y = "Latitude", color = "Salinity Range") + 
+  coord_quickmap() + 
+  theme_minimal()
+
+```
+
+
+
+
+```{r}
+world_map <- map_data("world")
+usa_map <- subset(world_map, region == "USA")
+
+ggplot() +
+  geom_polygon(data = usa_map, aes(x = long, y = lat, group = group), fill = "gray90", color = "black") + 
+  geom_tile(data = data_long, aes(x = Longitude, y = Latitude, fill = Salinity)) + 
+  scale_fill_viridis_c(name = "Salinity") + 
+  labs(title = "Salinity Distribution Off California", x = "Longitude", y = "Latitude") + 
+  coord_cartesian(xlim = c(-128, -108), ylim = c(26, 43)) + 
+  theme_minimal()
+
+```
+
+
+

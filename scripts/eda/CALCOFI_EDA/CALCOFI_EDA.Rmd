@@ -1,0 +1,641 @@
+---
+title: "CALCOFI_EDA"
+author: "Samantha Su"
+date: "2025-01-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#setwd('/Users/sammysu/Downloads/')
+#calcofi_data<-read.csv('combined_data.csv')
+
+calcofi_data <- read.csv("/Users/josh/Documents/GitHub/capstone-scripps/data/combined/combined_data.csv")
+
+library(ggplot2)
+library(maps)
+library(tidyverse)
+library(corrplot)
+library(reshape2)
+library(ggmap)
+library(dplyr)
+library(rlang)
+colnames(calcofi_data)
+```
+
+## Missing Data Heatmap
+
+```{r, echo=FALSE}
+missing_data<-calcofi_data %>% 
+  mutate(across(everything(), ~ as.integer(is.na(.)))) %>% 
+  rowid_to_column(var="Row") %>% 
+  pivot_longer(-Row, names_to="Column", values_to="Missing")
+ggplot(missing_data, aes(x=Column, y=Row, fill=as.factor(Missing)))+
+  geom_tile()+
+  scale_fill_manual(values=c("0"="blue", "1"="yellow"), labels=c("Present", "Missing"))+
+  theme_minimal()+
+  labs(title="Missing Data", x="Columns", y="Rows", fill="Data Status")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Correlation Matrix
+
+```{r, echo=FALSE}
+numeric_df<-calcofi_data %>% select(where(is.numeric))
+cor_matrix<-cor(numeric_df, use="pairwise.complete.obs")
+corrplot(cor_matrix, method="color", type="upper",
+         col=colorRampPalette(c("blue", "white", "red"))(200),
+         tl.cex=0.8, number.cex=0.7, addCoef.col="black",
+         title="Correlation Matrix", mar=c(0,0,2,0))
+```
+
+
+The correlation matrix provides some insights but mostly has limited practical value for your species distribution model. While it helps identify multicollinearity among numeric variables, it does not reveal strong relationships between potential predictors and marine mammal detections. 
+
+
+## Experimenting with Geographical Data Visualizations
+
+```{r, echo=FALSE}
+world_map<-map_data("world")
+usa_map<-subset(world_map, region=="USA")
+ggplot()+geom_polygon(data = usa_map, aes(x = long, y = lat, group = group), fill="gray90", color = "black")+
+  geom_point(data = calcofi_data, aes(x = Lon, y = Lat), color="blue", alpha=0.5) + 
+  labs(title = "Marine Mammal Detections Around California", x="Longitude", y="Latitude")+
+  coord_cartesian(xlim = c(-128, -108), ylim = c(26, 43)) +
+  theme_minimal()
+```
+
+## Experimenting with Geographical Data Visualizations w/ Heatmaps
+
+```{r, echo=FALSE}
+world_map<-map_data("world")
+usa_map<-subset(world_map, region == "USA")
+ggplot()+geom_polygon(data = usa_map, aes(x = long, y = lat, group = group), 
+               fill = "gray90", color = "black") +  
+  stat_density_2d(data = calcofi_data, aes(x = Lon, y = Lat, fill = ..level..), geom = "polygon", alpha = 0.5) +
+  scale_fill_viridis_c(option = "plasma") + 
+  labs(title = "Marine Mammal Density Heatmap: California",
+       x = "Longitude", y = "Latitude", fill = "Density") +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(28, 45)) +
+  theme_minimal()
+```
+Findings:
+-Marine mammal hotspots are concentrated along the Southern California coast and offshore waters.
+-The density heatmap better visualizes where animals aggregate, which is crucial for understanding their movement and habitat use.
+
+Note: These maps are a simpler version of the CalCOFI_Sonobuoy_detections_map_concatenated code in the google drive; I just wanted to experiment with mapping it using our dataset so that we can look for ways to improve it later. 
+
+```{r}
+calcofi_data$Season <- case_when(
+  calcofi_data$month %in% c(12, 1, 2) ~ "Winter",
+  calcofi_data$month %in% c(3, 4, 5) ~ "Spring",
+  calcofi_data$month %in% c(6, 7, 8) ~ "Summer",
+  TRUE ~ "Autumn")
+
+call_types <- c("A", "B", "D")
+
+for (call_type in call_types) {
+  for (season in unique(calcofi_data$Season)) {
+
+    seasonal_data <- calcofi_data %>%
+      filter(Season == season & !is.na(get(call_type)) & get(call_type) > 0)
+    if (nrow(seasonal_data) > 5) {
+      plot <- ggplot() +
+        borders("world", regions = "USA", fill = "gray90", colour = "black") +
+        stat_density_2d(data = seasonal_data, aes(x = Lon, y = Lat, fill = ..level..), 
+                        geom = "polygon", alpha = 0.5, bins = 50) +
+        scale_fill_viridis_c(option = "plasma") +
+        labs(title = paste("Marine Mammal Density Heatmap:", call_type, "Calls in", season),
+             x = "Longitude", y = "Latitude", fill = "Density") +
+        coord_cartesian(xlim = c(-130, -110), ylim = c(28, 45)) +
+        theme_minimal()
+      
+      print(plot)
+    }
+  }
+}
+```
+```{r}
+calcofi_data$Season <- case_when(
+  calcofi_data$month %in% c(12, 1, 2) ~ "Winter",
+  calcofi_data$month %in% c(3, 4, 5) ~ "Spring",
+  calcofi_data$month %in% c(6, 7, 8) ~ "Summer",
+  TRUE ~ "Autumn"
+)
+frequency_types <- c("X20Hz", "X40Hz")
+for (frequency in frequency_types) {
+  for (season in unique(calcofi_data$Season)) {
+    
+    seasonal_data <- calcofi_data %>%
+      filter(Season == season & !is.na(get(frequency)) & get(frequency) > 0)
+    if (nrow(seasonal_data) > 5) {
+      plot <- ggplot() +
+        borders("world", regions = "USA", fill = "gray90", colour = "black") +
+        stat_density_2d(data = seasonal_data, aes(x = Lon, y = Lat, fill = ..level..), 
+                        geom = "polygon", alpha = 0.5, bins = 50) +
+        scale_fill_viridis_c(option = "plasma") +
+        labs(title = paste("Marine Mammal Density Heatmap:", frequency, "Calls in", season),
+             x = "Longitude", y = "Latitude", fill = "Density") +
+        coord_cartesian(xlim = c(-130, -110), ylim = c(28, 45)) +
+        theme_minimal()
+      
+      print(plot)
+    }
+  }
+}
+```
+
+
+## Depth Vs. Marine Mammal Detections
+
+```{r}
+ggplot(calcofi_data, aes(x = Est.Depth)) +
+  geom_point(aes(y = `X20Hz`, color = "20Hz"), alpha = 0.5) +
+  geom_point(aes(y = `X40Hz`, color = "40Hz"), alpha = 0.5) +
+  scale_color_manual(values = c("20Hz" = "blue", "40Hz" = "orange")) +
+  labs(title = "Depth vs. Marine Mammal Signal Strength (20Hz & 40Hz)",
+       x = "Depth (m)", y = "Signal Strength", color = "Frequency") +
+  theme_minimal()
+```
+```{r}
+ggplot(calcofi_data, aes(x = Est.Depth)) +
+  geom_point(aes(y = `A`, color = "A"), alpha = 0.5) +
+  geom_point(aes(y = `B`, color = "B"), alpha = 0.5) +
+  geom_point(aes(y = `D`, color = "D"), alpha = 0.5) +
+  scale_color_manual(values = c("A" = "red", "B" = "orange", "D" = "green")) +
+  labs(title = "Depth vs. Marine Mammal Signal Strength (20Hz & 40Hz)",
+       x = "Depth (m)", y = "Signal Strength", color = "Frequency") +
+  theme_minimal()
+```
+## Marine Mammal Signal Strength by Station Type
+
+
+
+```{r, echo=FALSE}
+ggplot(calcofi_data, aes(x = Sta.Type)) +
+  geom_boxplot(aes(y = X20Hz, fill = "20Hz"), alpha = 0.5, position = position_dodge(width = 0.8)) +
+  geom_boxplot(aes(y = X40Hz, fill = "40Hz"), alpha = 0.5, position = position_dodge(width = 0.8)) +
+  scale_fill_manual(values = c("20Hz" = "blue", "40Hz" = "orange")) +
+  labs(title = "Marine Mammal Signal Strength by Station Type",
+       x = "Station Type", y = "Signal Strength",
+       fill = "Frequency") +
+  theme_minimal()
+```
+```{r, echo=FALSE}
+melted_data <- melt(calcofi_data, id.vars = "Sta.Type", measure.vars = c("A", "B", "D"),
+                    variable.name = "Signal.Type", value.name = "Signal.Strength")
+ggplot(melted_data, aes(x = Sta.Type, y = Signal.Strength, fill = Signal.Type)) +
+  geom_boxplot(alpha = 0.5, position = position_dodge(width = 0.8)) +
+  scale_fill_manual(values = c("A" = "blue", "B" = "orange", "D" = "green")) +
+  labs(title = "Marine Mammal Signal Strength by Station Type",
+       x = "Station Type", y = "Signal Strength",
+       fill = "Signal Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r, echo=FALSE}
+ggplot(calcofi_data) +
+  geom_histogram(aes(x = X20Hz, fill = "20Hz"), bins = 80, alpha = 0.5) +
+  geom_histogram(aes(x = X40Hz, fill = "40Hz"), bins = 80, alpha = 0.5) +
+  scale_fill_manual(values = c("20Hz" = "blue", "40Hz" = "orange")) +
+  labs(title = "Distribution of Marine Mammal Signal Strength (20Hz & 40Hz)",
+       x = "Signal Strength", y = "Count",
+       fill = "Frequency") 
+```
+
+```{r, echo=FALSE}
+melted_data <- melt(calcofi_data, measure.vars = c("A", "B", "D"),
+                    variable.name = "Signal.Type", value.name = "Signal.Strength")
+ggplot(melted_data, aes(x = Signal.Strength, fill = Signal.Type)) +
+  geom_histogram(bins = 80, alpha = 0.5, position = "identity") +
+  scale_fill_manual(values = c("A" = "blue", "B" = "orange", "D" = "green")) +
+  labs(title = "Distribution of Marine Mammal Signal Strength (A, B, & D)",
+       x = "Signal Strength", y = "Count",
+       fill = "Signal Type") +
+  theme_minimal()
+```
+
+## Time Spent Recording vs Number of Calls Detected
+
+```{r, echo=FALSE}
+cut <- calcofi_data %>% drop_na(Duration_hrs) %>% group_by(Station_key) %>%
+  mutate(total_hrs = sum(Duration_hrs)) %>%
+  mutate(total_x20hz = sum(X20Hz)) %>%
+  mutate(total_d = sum(D)) %>%
+  mutate(total_a = sum(A)) %>%
+  mutate(total_b = sum(B)) %>%
+  mutate(total_x40hz = sum(X40Hz)) %>%
+  mutate(scaled_x20hz = total_x20hz / total_hrs) %>%
+  mutate(scaled_d = total_d / total_hrs) %>%
+  mutate(scaled_a = total_a / total_hrs) %>%
+  mutate(scaled_b = total_b / total_hrs) %>%
+  mutate(scaled_x40hz = total_x40hz / total_hrs) 
+
+m20 <- lm(total_x20hz ~ total_hrs, cut)
+m40 <- lm(total_x40hz ~ total_hrs, cut)
+ma <- lm(total_a ~ total_hrs, cut)
+mb <- lm(total_b ~ total_hrs, cut)
+md <- lm(total_d ~ total_hrs, cut)
+
+r20 <- summary(m20)$r.squared
+r40 <- summary(m40)$r.squared
+ra <- summary(ma)$r.squared
+rb <- summary(mb)$r.squared
+rd <- summary(md)$r.squared
+
+cut$group_x20hz <- "X20Hz"
+cut$group_x40hz <- "X40Hz"
+cut$group_d <- "D"
+cut$group_b <- "B"
+cut$group_a <- "A"
+```
+
+```{r, echo=FALSE}
+ggplot(cut, aes(x = total_hrs)) +
+  geom_point(aes(y = total_x20hz, color = cut$group_x20hz)) +
+  geom_point(aes(y = total_x40hz, color = cut$group_x40hz)) + 
+  geom_point(aes(y = total_d, color = cut$group_d)) +
+  geom_point(aes(y = total_b, color = cut$group_b)) +
+  geom_point(aes(y = total_a, color = cut$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Total Hours Recorded", color = "Type of Call", title = "All Hours vs All Calls")+
+  scale_color_manual(values = c("X20Hz" = "blue", 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                "B" = "purple", 
+                                "A" = "orange")) +
+  theme_minimal()
+
+```
+
+Here, each point represents one station's total calls of a given type. For example, 1 blue dot is the total 20 hz calls at station A, 1 orange dot is the total 40 hz calls at station A, but no 2 dots of the same color correspond to the same station.
+
+```{r, echo=FALSE}
+ggplot(cut, aes(x = total_hrs, y = total_x20hz)) +
+  geom_point(color = "blue") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_x20hz) * .9, label = paste("R² = ", round(r20,3)))+
+  labs(y = "Number of X20HZ Whale Calls", x = "Total Hours Recorded", title = "Only 20HZ Calls") +
+  theme_minimal() +
+  theme(plot.subtitle = element_blank())
+
+ggplot(cut, aes(x = total_hrs, y = total_d)) +
+  geom_point(color = "green") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_d) * .9, label = paste("R² = ", round(rd,3)))+
+  labs(y = "Number of D Whale Calls", x = "Total Hours Recorded", title = "Only D Calls") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(cut, aes(x = total_hrs, y = total_x40hz)) +
+  geom_point(color = "red") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_x40hz) * .9, label = paste("R² = ", round(r40,3)))+
+  labs(y = "Number of X40HZ Whale Calls", x = "Total Hours Recorded", title = "Only 40HZ Calls") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(cut, aes(x = total_hrs, y = total_b)) +
+  geom_point(color = "purple") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_b) * .9, label = paste("R² = ", round(rb,3)))+
+  labs(y = "Number of B Whale Calls", x = "Total Hours Recorded", title = "Only B Calls") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(cut, aes(x = total_hrs, y = total_a)) +
+  geom_point(color = "orange") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(cut$total_hrs) *.9, y = max(cut$total_a) * .9, label = paste("R² = ", round(ra,3)))+
+  labs(y = "Number of A Whale Calls", x = "Total Hours Recorded", title = "Only A Calls") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+```
+
+
+```{r, echo=FALSE}
+ggplot(cut, aes(x = total_hrs)) +
+  geom_point(aes(y = scaled_x20hz, color = cut$group_x20hz)) +
+  geom_point(aes(y = scaled_x40hz, color = cut$group_x40hz)) + 
+  geom_point(aes(y = scaled_d, color = cut$group_d)) +
+  geom_point(aes(y = scaled_b, color = cut$group_b)) +
+  geom_point(aes(y = scaled_a, color = cut$group_a)) +
+  labs(y = "Number of Observed Whale Calls Per Hour", x = "Total Hours Recorded", color = "Type of Call", title = "Calls Scaled by Effort")+
+  scale_color_manual(values = c("X20Hz" = "blue", 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                "B" = "purple", 
+                                "A" = "orange")) +
+  theme_minimal()
+
+```
+
+Here I scaled the observations by effort. Each point is the number of whale calls of a certain type per hour at a given station. This plots seeks to understand if there is a relationship between total hours recording and number of observed calls per hour.
+
+color by calcofi line
+
+### Now Only Observing Whale Dense Areas
+
+The "Main" section is defined to b 32.5 < Latitude < 35, -124 < Longitude < -117.5
+
+# Put visualzation of "Main" here
+```{r}
+world_map<-map_data("world")
+usa_map<-subset(world_map, region == "USA")
+ggplot()+geom_polygon(data = usa_map, aes(x = long, y = lat, group = group), 
+               fill = "gray90", color = "black") +  
+  stat_density_2d(data = calcofi_data, aes(x = Lon, y = Lat, fill = ..level..), geom = "polygon", alpha = 0.5) +
+  scale_fill_viridis_c(option = "plasma", limits = c(0.02, NA)) + 
+  labs(title = "Marine Mammal Density Heatmap: California",
+       x = "Longitude", y = "Latitude", fill = "Density") +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(28, 45)) +
+  theme_minimal()
+```
+
+```{r, echo=FALSE}
+main <- cut %>% filter(Lat >= 32.5 & Lat <= 35) %>% filter(Lon >= -124 & Lon <= -117.5)
+
+m20 <- lm(total_x20hz ~ total_hrs, main)
+m40 <- lm(total_x40hz ~ total_hrs, main)
+ma <- lm(total_a ~ total_hrs, main)
+mb <- lm(total_b ~ total_hrs, main)
+md <- lm(total_d ~ total_hrs, main)
+
+r20 <- summary(m20)$r.squared
+r40 <- summary(m40)$r.squared
+ra <- summary(ma)$r.squared
+rb <- summary(mb)$r.squared
+rd <- summary(md)$r.squared
+
+main$group_x20hz <- "X20Hz"
+main$group_x40hz <- "X40Hz"
+main$group_d <- "D"
+main$group_b <- "B"
+main$group_a <- "A"
+
+ggplot(main, aes(x = total_hrs)) +
+  geom_point(aes(y = total_x20hz, color = main$group_x20hz)) +
+  geom_point(aes(y = total_x40hz, color = main$group_x40hz)) + 
+  geom_point(aes(y = total_d, color = main$group_d)) +
+  geom_point(aes(y = total_b, color = main$group_b)) +
+  geom_point(aes(y = total_a, color = main$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Total Hours Recorded", color = "Type of Call", title = "Only Main Section")+
+  scale_color_manual(values = c("X20Hz" = "blue", 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                "B" = "purple", 
+                                "A" = "orange")) +
+  theme_minimal()
+
+ggplot(main, aes(x = total_hrs, y = total_x20hz)) +
+  geom_point(color = "blue") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(main$total_hrs) *.9, y = max(main$total_x20hz) * .9, label = paste("R² = ", round(r20,3)))+
+  labs(y = "Number of X20HZ Whale Calls", x = "Total Hours Recorded", title = "Only 20HZ Calls in Main") +
+  theme_minimal() +
+  theme(plot.subtitle = element_blank())
+
+ggplot(main, aes(x = total_hrs, y = total_d)) +
+  geom_point(color = "green") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(main$total_hrs) *.9, y = max(main$total_d) * .9, label = paste("R² = ", round(rd,3)))+
+  labs(y = "Number of D Whale Calls", x = "Total Hours Recorded", title = "Only D Calls in Main") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(main, aes(x = total_hrs, y = total_x40hz)) +
+  geom_point(color = "red") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(main$total_hrs) *.9, y = max(main$total_x40hz) * .9, label = paste("R² = ", round(r40,3)))+
+  labs(y = "Number of X40HZ Whale Calls", x = "Total Hours Recorded", title = "Only 40HZ Calls in Main") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(main, aes(x = total_hrs, y = total_b)) +
+  geom_point(color = "purple") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(main$total_hrs) *.9, y = max(main$total_b) * .9, label = paste("R² = ", round(rb,3)))+
+  labs(y = "Number of B Whale Calls", x = "Total Hours Recorded", title = "Only B Calls in Main") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(main, aes(x = total_hrs, y = total_a)) +
+  geom_point(color = "orange") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(main$total_hrs) *.9, y = max(main$total_a) * .9, label = paste("R² = ", round(ra,3)))+
+  labs(y = "Number of A Whale Calls", x = "Total Hours Recorded", title = "Only A Calls in Main") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+```
+
+
+```{r}
+ggplot(main, aes(x = total_hrs)) +
+  geom_point(aes(y = scaled_x20hz, color = main$group_x20hz)) +
+  geom_point(aes(y = scaled_x40hz, color = main$group_x40hz)) + 
+  geom_point(aes(y = scaled_d, color = main$group_d)) +
+  geom_point(aes(y = scaled_b, color = main$group_b)) +
+  geom_point(aes(y = scaled_a, color = main$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Total Hours Recorded", color = "Type of Call", title = "Only Main Section")+
+  scale_color_manual(values = c("X20Hz" = "blue", 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                "B" = "purple", 
+                                "A" = "orange")) +
+  theme_minimal()
+
+ggplot(main, aes(x = total_hrs)) +
+  geom_point(aes(y = scaled_x40hz, color = main$group_x40hz)) + 
+  geom_point(aes(y = scaled_d, color = main$group_d)) +
+  geom_point(aes(y = scaled_a, color = main$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Total Hours Recorded", color = "Type of Call", title = "Only Main Section")+
+  scale_color_manual(values = c( 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                 
+                                "A" = "orange")) +
+  theme_minimal()
+```
+
+
+The "Secondary" section is defined to b 35 < Latitude < 37.5, -126 < Longitude < -122.5
+
+```{r, echo=FALSE}
+second <- cut %>% filter(Lat >= 35 & Lat <= 37.5) %>% filter(Lon >= -126 & Lon <= -122.5)
+
+
+m20 <- lm(total_x20hz ~ total_hrs, second)
+m40 <- lm(total_x40hz ~ total_hrs, second)
+ma <- lm(total_a ~ total_hrs, second)
+mb <- lm(total_b ~ total_hrs, second)
+md <- lm(total_d ~ total_hrs, second)
+
+r20 <- summary(m20)$r.squared
+r40 <- summary(m40)$r.squared
+ra <- summary(ma)$r.squared
+rb <- summary(mb)$r.squared
+rd <- summary(md)$r.squared
+
+second$group_x20hz <- "X20Hz"
+second$group_x40hz <- "X40Hz"
+second$group_d <- "D"
+second$group_b <- "B"
+second$group_a <- "A"
+
+ggplot(second, aes(x = total_hrs)) +
+  geom_point(aes(y = total_x20hz, color = second$group_x20hz)) +
+  geom_point(aes(y = total_x40hz, color = second$group_x40hz)) + 
+  geom_point(aes(y = total_d, color = second$group_d)) +
+  geom_point(aes(y = total_b, color = second$group_b)) +
+  geom_point(aes(y = total_a, color = second$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Total Hours Recorded", color = "Type of Call", title = "Only Secondary Section")+
+  scale_color_manual(values = c("X20Hz" = "blue", 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                "B" = "purple", 
+                                "A" = "orange")) +
+  theme_minimal()
+
+
+
+ggplot(second, aes(x = total_hrs, y = total_x20hz)) +
+  geom_point(color = "blue") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(second$total_hrs) *.9, y = max(second$total_x20hz) * .9, label = paste("R² = ", round(r20,3)))+
+  labs(y = "Number of X20HZ Whale Calls", x = "Total Hours Recorded", title = "Only 20HZ Calls in Secondary") +
+  theme_minimal() +
+  theme(plot.subtitle = element_blank())
+
+ggplot(second, aes(x = total_hrs, y = total_d)) +
+  geom_point(color = "green") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(second$total_hrs) *.9, y = max(second$total_d) * .9, label = paste("R² = ", round(rd,3)))+
+  labs(y = "Number of D Whale Calls", x = "Total Hours Recorded", title = "Only D Calls in Secondary") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(second, aes(x = total_hrs, y = total_x40hz)) +
+  geom_point(color = "red") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(second$total_hrs) *.9, y = max(second$total_x40hz) * .9, label = paste("R² = ", round(r40,3)))+
+  labs(y = "Number of X40HZ Whale Calls", x = "Total Hours Recorded", title = "Only 40HZ Calls in Secondary") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(second, aes(x = total_hrs, y = total_b)) +
+  geom_point(color = "purple") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black")+
+  annotate("text", x = max(second$total_hrs) *.9, y = max(second$total_b) * .9, label = paste("R² = ", round(rb,3)))+
+  labs(y = "Number of B Whale Calls", x = "Total Hours Recorded", title = "Only B Calls in Secondary") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+
+ggplot(second, aes(x = total_hrs, y = total_a)) +
+  geom_point(color = "orange") +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "black", show.legend = FALSE)+
+  annotate("text", x = max(second$total_hrs) *.9, y = max(second$total_a) * .9, label = paste("R² = ", round(ra,3)))+
+  labs(y = "Number of A Whale Calls", x = "Total Hours Recorded", title = "Only A Calls in Secondary") +
+  theme_minimal()+
+  theme(plot.subtitle = element_blank())
+```
+
+
+## Time Spent Recording vs Number of Calls Detected
+
+```{r, echo=FALSE}
+cut2 <- calcofi_data %>% drop_na() %>% group_by(year) %>%
+  mutate(total_x20hz = sum(X20Hz)) %>%
+  mutate(total_d = sum(D)) %>%
+  mutate(total_a = sum(A)) %>%
+  mutate(total_b = sum(B)) %>%
+  mutate(total_x40hz = sum(X40Hz))
+
+cut2$group_x20hz <- "X20Hz"
+cut2$group_x40hz <- "X40Hz"
+cut2$group_d <- "D"
+cut2$group_b <- "B"
+cut2$group_a <- "A"
+```
+
+```{r, echo=FALSE}
+ggplot(cut2,aes(x = year))+
+  geom_point(aes(y = total_x20hz, color = cut2$group_x20hz)) +
+  geom_point(aes(y = total_x40hz, color = cut2$group_x40hz)) +
+  geom_point(aes(y = total_d, color = cut2$group_d)) +
+  geom_point(aes(y = total_b, color = cut2$group_b)) +
+  geom_point(aes(y = total_a, color = cut2$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Year", color = "Type of Call")+
+  scale_color_manual(values = c("X20Hz" = "blue", 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                "B" = "purple", 
+                                "A" = "orange")) +
+  theme_minimal()
+
+ggplot(cut2,aes(x = year))+
+  geom_point(aes(y = total_x40hz, color = cut2$group_x40hz)) +
+  geom_point(aes(y = total_d, color = cut2$group_d)) +
+  geom_point(aes(y = total_b, color = cut2$group_b)) +
+  geom_point(aes(y = total_a, color = cut2$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Year", color = "Type of Call")+
+  scale_color_manual(values = c( 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                "B" = "purple", 
+                                "A" = "orange")) +
+  theme_minimal()
+```
+
+In Becker Et Al, they mention that certain older whale observation techniques had been deemed inaccurate. They found that older techniques were likely under reporting the number of observed whales. With these visualizations we sought to understand if updated observation techniques would result in higher frequency of whale detections. However, it seems as though there is little to no correlation. This is likely because our data starts at 2012, after they had already updated their techniques.
+
+
+## Marine Mammal Detections by Month
+
+```{r, echo = FALSE}
+cut3 <- calcofi_data %>% drop_na() %>% group_by(month) %>%
+  mutate(total_x20hz = sum(X20Hz)) %>%
+  mutate(total_d = sum(D)) %>%
+  mutate(total_a = sum(A)) %>%
+  mutate(total_b = sum(B)) %>%
+  mutate(total_x40hz = sum(X40Hz))
+
+cut3$group_x20hz <- "X20Hz"
+cut3$group_x40hz <- "X40Hz"
+cut3$group_d <- "D"
+cut3$group_b <- "B"
+cut3$group_a <- "A"
+
+ggplot(cut3,aes(x = month))+
+  geom_point(aes(y = total_x20hz, color = cut3$group_x20hz)) +
+  geom_point(aes(y = total_x40hz, color = cut3$group_x40hz)) +
+  geom_point(aes(y = total_d, color = cut3$group_d)) +
+  geom_point(aes(y = total_b, color = cut3$group_b)) +
+  geom_point(aes(y = total_a, color = cut3$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Month", color = "Type of Call", title = "Number of Total Calls by Month")+
+  scale_color_manual(values = c("X20Hz" = "blue", 
+                                "X40Hz" = "red", 
+                                "D" = "green", 
+                                "B" = "purple", 
+                                "A" = "orange")) +
+  theme_minimal()
+
+ggplot(cut3,aes(x = month))+
+  geom_point(aes(y = total_x40hz, color = cut3$group_x40hz)) +
+  geom_point(aes(y = total_d, color = cut3$group_d)) +
+  geom_point(aes(y = total_a, color = cut3$group_a)) +
+  labs(y = "Number of Observed Whale Calls", x = "Month", color = "Type of Call", title = "Number of Total Calls by Month (No 20HZ or B)")+
+  scale_color_manual(values = c("X40Hz" = "red", 
+                                "D" = "green", 
+                                "A" = "orange")) +
+  theme_minimal()
+```
+
+get hourly presence ,, scale by effort
+
+The totals were kind of messed up before. Now what is being shown is month vs total calls in a given month (regardless of year)
+
+line plot to see which year it is
+
+box plot
+

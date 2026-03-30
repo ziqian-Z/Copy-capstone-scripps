@@ -1,0 +1,441 @@
+---
+title: "Josh Ocean Maps Personal"
+output: html_document
+date: "2025-03-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Peter Read This
+
+ggoceanmaps works very similarly to ggplot, it essentially adds layers on top of one another to your liking. basemap() creates the base map to build upon, and the limits argument is just the max lat and long for our given area (for now i have it as the max and min of each but its hardcoded) If you look at data_long, ive created a 3 column data frame that has lat, long, and salinity at that coordinate, I also made a levels column to essentially create bins for each level but that was using ggplot, and i think basemap with ggoceanmaps is better, so ignore levels for now.
+
+I've written several functions that take a file path as their argument, and then it can do all the necessary preprocessing and graphing for that file. The problem right now is that each of these function calls only plots one days worth of environmental factors, and i havent figured out yet how to animate through them.
+
+I asked chat ab how to make animations, and its suggestion is to save each plot as a file like this 
+
+```{r,eval = FALSE}
+plot_file <- paste(output_dir, "/Salinity_", depth, "_", dated, ".png", sep = "")
+```
+
+where output_dir is whatever location we want to store the files at. I think it would be best to store them on the github somehow, but im not sure how to do that. then chat said to use the "av" package in R and make the animations like this 
+
+```{r,eval = FALSE}
+library(av)
+
+ #Function to create a video from images
+create_video_from_images <- function(image_folder, output_video_file){
+  # Get list of images in the folder (sorted by filename)
+  images <- list.files(image_folder, pattern = "\\.png$", full.names = TRUE)
+  
+  # Create a video
+  av_encode_video(images, output_video_file, framerate = 1)  # 1 frame per second
+}
+```
+
+some problems i foresee is that everytime we run this we'll be saving multiple files to some folder which would pile up over time, maybe incorporate into the script someway to scrub that folder after its used. I'm not at all attached to this way of doing it, so if you come up with a better strategy feel free.
+
+Another possible approach is using gganimate but from my understanding, gganimate wants to iterate over some time variable, so we would need to put all the data into one big csv and then iterate over i guess the date? im not rly familiar with gganimate so thats all i can rly say
+
+if you have more questions, feel free to text me
+
+```{r, echo = FALSE}
+library(ggplot2)
+library(ggOceanMaps)
+library(tidyr)
+library(dplyr)
+library(maps)
+library(viridis)
+library(ggmap)
+library(stringr)
+```
+
+```{r, echo=FALSE}
+data <- read.csv("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_19-Jul-2021.csv")
+
+data$Row <- gsub("^Lon_", "", data$Row)
+
+colnames(data)[1] <- "Longitude"
+
+for (col in colnames(data)){
+  if (startsWith(col, "Lat_")){
+    colnames(data) <- gsub("^Lat_","",colnames(data))
+  }
+}
+
+data_long <- data %>%
+  pivot_longer(cols = -Longitude, names_to = "Latitude", values_to = "Salinity") %>% mutate(Longitude = as.numeric(Longitude)) %>% mutate(Latitude = as.numeric(Latitude))%>% mutate(Salinity = as.numeric(Salinity))
+
+data_long <- data_long %>% 
+  mutate(Longitude = Longitude - 360)
+
+data_long <- data_long[!is.na(data_long$Salinity) & is.finite(data_long$Salinity), ]
+
+data_long$level <- cut(data_long$Salinity, breaks = seq(min(data_long$Salinity), max(data_long$Salinity), by = ((max(data_long$Salinity) - min(data_long$Salinity)) / 4)), labels = c("Low", "Moderate", "High", "Very High"), right = FALSE)
+
+
+usa_map <- map_data("state")
+ca_map <- subset(usa_map, region == "california")
+```
+
+```{r, eval=FALSE}
+p <- basemap(limits = c(233.0312 - 360, 244.9688 - 360, 29.0438, 38.9813), bathymetry = FALSE) +
+  geom_tile(data = data_long, aes(x = Longitude, y = Latitude, fill = Salinity)) +
+  scale_fill_viridis_c(name = "Salinity") +
+  labs(x = "Longitude", y = "Latitude", title = "Salinity Distribution Off California Coast")
+
+p_serial <- serialize(p, NULL)
+p_64 <- base64enc::base64encode(p_serial)
+
+d <-data.frame(id =1, plot = p_64)
+write.csv(d,"plot.csv", row.names = FALSE)
+
+d_load <- read.csv("plot.csv")
+plot_raw <- base64enc::base64decode(d_load$plot[1])
+p_load <- unserialize(plot_raw)
+
+print(p_load)
+```
+
+
+get animations of velocities (corrected), salinity, change the colorations to be more clear
+
+```{r,echo=FALSE}
+ggplot() +
+  geom_polygon(data = ca_map, aes(x = long, y = lat, group = group), fill = "gray90", color = "black") + 
+  geom_point(data = data_long, aes(x = Longitude, y = Latitude, color = level), size = 2, alpha = 0.8) + 
+  scale_color_manual(values = c("Low" = "blue", "Moderate" = "green","High" = "yellow", "Very High" = "red")) + 
+  labs(title = "Salinity on July 19, 2021", x = "Longitude", y = "Latitude", color = "Salinity Range") + 
+  coord_quickmap() + 
+  theme_minimal()
+
+world_map <- map_data("world")
+usa_map <- subset(world_map, region == "USA")
+
+ggplot() +
+  geom_polygon(data = usa_map, aes(x = long, y = lat, group = group), fill = "gray90", color = "black") + 
+  geom_tile(data = data_long, aes(x = Longitude, y = Latitude, fill = Salinity)) + 
+  scale_fill_viridis_c(name = "Salinity") + 
+  labs(title = "Salinity on July 19, 2021", x = "Longitude", y = "Latitude") + 
+  coord_cartesian(xlim = c(-128, -108), ylim = c(26, 43)) + 
+  theme_minimal()
+
+```
+
+# Salinity
+```{r, echo=FALSE}
+Salinitygraph <- function(datafile){
+  data <- read.csv(datafile)
+  
+  dated <- str_extract(datafile, "\\d{2}-[A-Za-z]{3}-\\d{4}")
+  
+  depth <- str_extract(datafile, "(?<=Salinity_depth_-)\\d+")
+
+data$Row <- gsub("^Lon_", "", data$Row)
+
+colnames(data)[1] <- "Longitude"
+
+for (col in colnames(data)){
+  if (startsWith(col, "Lat_")){
+    colnames(data) <- gsub("^Lat_","",colnames(data))
+  }
+}
+
+data_long <- data %>%
+  pivot_longer(cols = -Longitude, names_to = "Latitude", values_to = "Salinity") %>% mutate(Longitude = as.numeric(Longitude)) %>% mutate(Latitude = as.numeric(Latitude))%>% mutate(Salinity = as.numeric(Salinity))
+
+data_long <- data_long %>% 
+  mutate(Longitude = Longitude - 360)
+
+data_long <- data_long[!is.na(data_long$Salinity) & is.finite(data_long$Salinity), ]
+
+data_long$level <- cut(data_long$Salinity, breaks = seq(min(data_long$Salinity), max(data_long$Salinity), by = ((max(data_long$Salinity) - min(data_long$Salinity)) / 4)), labels = c("Low", "Moderate", "High", "Very High"), right = FALSE)
+
+
+
+basemap(limits = c(233.0312 - 360, 244.9688 - 360, 29.0438, 38.9813), bathymetry = FALSE) +
+  geom_tile(data = data_long, aes(x = Longitude, y = Latitude, fill = Salinity)) +
+  scale_fill_viridis_c(name = "Salinity") +
+  labs(x = "Longitude", y = "Latitude", title = paste("California Coastal Salinity at Depth -",depth, "m on",dated))
+}
+
+```
+
+```{r, echo=FALSE}
+Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_19-Jul-2021.csv")
+Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_20-Jul-2021.csv")
+Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_21-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_22-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_23-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_24-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_25-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_26-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_27-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_28-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_29-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_30-Jul-2021.csv")
+#Salinitygraph("~/Downloads/CASE-STSE/Salinity_depth_-55.0_date_31-Jul-2021.csv")
+```
+
+# Temperature
+
+```{r,echo=FALSE}
+Tempgraph <- function(datafile){
+  data <- read.csv(datafile)
+  
+  dated <- str_extract(datafile, "\\d{2}-[A-Za-z]{3}-\\d{4}")
+  
+  depth <- str_extract(datafile, "(?<=Temp_depth_-)\\d+")
+
+data$Row <- gsub("^Lon_", "", data$Row)
+
+colnames(data)[1] <- "Longitude"
+
+for (col in colnames(data)){
+  if (startsWith(col, "Lat_")){
+    colnames(data) <- gsub("^Lat_","",colnames(data))
+  }
+}
+
+data_long <- data %>%
+  pivot_longer(cols = -Longitude, names_to = "Latitude", values_to = "Temperature") %>% mutate(Longitude = as.numeric(Longitude)) %>% mutate(Latitude = as.numeric(Latitude))%>% mutate(Temperature = as.numeric(Temperature))
+
+data_long <- data_long %>% 
+  mutate(Longitude = Longitude - 360)
+
+data_long <- data_long[!is.na(data_long$Temperature) & is.finite(data_long$Temperature), ]
+
+data_long$level <- cut(data_long$Temperature, breaks = seq(min(data_long$Temperature), max(data_long$Temperature), by = ((max(data_long$Temperature) - min(data_long$Temperature)) / 4)), labels = c("Low", "Moderate", "High", "Very High"), right = FALSE)
+
+
+
+basemap(limits = c(233.0312 - 360, 244.9688 - 360, 29.0438, 38.9813), bathymetry = FALSE) +
+  geom_tile(data = data_long, aes(x = Longitude, y = Latitude, fill = Temperature)) +
+  scale_fill_viridis_c(name = "Temperature") +
+  labs(x = "Longitude", y = "Latitude", title = paste("California Coastal Temperature at Depth -",depth, "m on",dated))
+}
+```
+
+
+
+
+```{r,echo=FALSE}
+Tempgraph("~/Downloads/CASE-STSE/Temp_depth_-55.0_date_19-Jul-2021.csv")
+Tempgraph("~/Downloads/CASE-STSE/Temp_depth_-55.0_date_20-Jul-2021.csv")
+Tempgraph("~/Downloads/CASE-STSE/Temp_depth_-55.0_date_21-Jul-2021.csv")
+```
+
+# U_Velovity
+
+```{r,echo=FALSE}
+UVelgraph <- function(datafile){
+  data <- read.csv(datafile)
+  
+  dated <- str_extract(datafile, "\\d{2}-[A-Za-z]{3}-\\d{4}")
+  
+  depth <- str_extract(datafile, "(?<=U_velocity_depth_-)\\d+")
+
+data$Row <- gsub("^Lon_", "", data$Row)
+
+colnames(data)[1] <- "Longitude"
+
+for (col in colnames(data)){
+  if (startsWith(col, "Lat_")){
+    colnames(data) <- gsub("^Lat_","",colnames(data))
+  }
+}
+
+data_long <- data %>%
+  pivot_longer(cols = -Longitude, names_to = "Latitude", values_to = "U_Velocity") %>% mutate(Longitude = as.numeric(Longitude)) %>% mutate(Latitude = as.numeric(Latitude))%>% mutate(U_Velocity = as.numeric(U_Velocity))
+
+data_long <- data_long %>% 
+  mutate(Longitude = Longitude - 360)
+
+data_long <- data_long[!is.na(data_long$U_Velocity) & is.finite(data_long$U_Velocity), ]
+
+data_long$level <- cut(data_long$U_Velocity, breaks = seq(min(data_long$U_Velocity), max(data_long$U_Velocity), by = ((max(data_long$U_Velocity) - min(data_long$U_Velocity)) / 4)), labels = c("Low", "Moderate", "High", "Very High"), right = FALSE)
+
+
+
+basemap(limits = c(233.0312 - 360, 244.9688 - 360, 29.0438, 38.9813), bathymetry = FALSE) +
+  geom_tile(data = data_long, aes(x = Longitude, y = Latitude, fill = U_Velocity)) +
+  scale_fill_viridis_c(name = "U_Velocity") +
+  labs(x = "Longitude", y = "Latitude", title = paste("California Coastal U_Velocity at Depth -",depth, "m on",dated))
+}
+```
+
+```{r,echo=FALSE}
+UVelgraph("~/Downloads/CASE-STSE/U_velocity_depth_-55.0_date_19-Jul-2021.csv")
+UVelgraph("~/Downloads/CASE-STSE/U_velocity_depth_-55.0_date_20-Jul-2021.csv")
+UVelgraph("~/Downloads/CASE-STSE/U_velocity_depth_-55.0_date_21-Jul-2021.csv")
+```
+
+# V_Velocity
+
+```{r,echo=FALSE}
+VVelgraph <- function(datafile){
+  data <- read.csv(datafile)
+  
+  dated <- str_extract(datafile, "\\d{2}-[A-Za-z]{3}-\\d{4}")
+  
+  depth <- str_extract(datafile, "(?<=V_velocity_depth_-)\\d+")
+
+data$Row <- gsub("^Lon_", "", data$Row)
+
+colnames(data)[1] <- "Longitude"
+
+for (col in colnames(data)){
+  if (startsWith(col, "Lat_")){
+    colnames(data) <- gsub("^Lat_","",colnames(data))
+  }
+}
+
+data_long <- data %>%
+  pivot_longer(cols = -Longitude, names_to = "Latitude", values_to = "V_Velocity") %>% mutate(Longitude = as.numeric(Longitude)) %>% mutate(Latitude = as.numeric(Latitude))%>% mutate(V_Velocity = as.numeric(V_Velocity))
+
+data_long <- data_long %>% 
+  mutate(Longitude = Longitude - 360)
+
+data_long <- data_long[!is.na(data_long$V_Velocity) & is.finite(data_long$V_Velocity), ]
+
+data_long$level <- cut(data_long$V_Velocity, breaks = seq(min(data_long$V_Velocity), max(data_long$V_Velocity), by = ((max(data_long$V_Velocity) - min(data_long$V_Velocity)) / 4)), labels = c("Low", "Moderate", "High", "Very High"), right = FALSE)
+
+
+
+basemap(limits = c(233.0312 - 360, 244.9688 - 360, 29.0438, 38.9813), bathymetry = FALSE) +
+  geom_tile(data = data_long, aes(x = Longitude, y = Latitude, fill = V_Velocity)) +
+  scale_fill_viridis_c(name = "V_Velocity") +
+  labs(x = "Longitude", y = "Latitude", title = paste("California Coastal V_Velocity at Depth -",depth, "m on",dated))
+}
+```
+
+```{r, echo=FALSE}
+VVelgraph("~/Downloads/CASE-STSE/V_velocity_depth_-55.0_date_19-Jul-2021.csv")
+VVelgraph("~/Downloads/CASE-STSE/V_velocity_depth_-55.0_date_20-Jul-2021.csv")
+VVelgraph("~/Downloads/CASE-STSE/V_velocity_depth_-55.0_date_21-Jul-2021.csv")
+
+
+```
+quiver function matlab for steepeset descent
+
+fields pacakge
+
+winter spring summer fall each day of the cruise, try to get things into one place, not rly sure what michaela wants maybe just ask her.
+
+clear out the blanks 
+
+maybe have it go a little slower and have it go in chronological order
+
+see if we can get the acoustic detections onto the animations by cruise
+
+
+```{r}
+data <- read.csv("/Users/josh/Documents/GitHub/capstone-scripps/data/Merged_CalCOFI/CalCOFI_final_merged_data_2012-2023.csv")
+#View(data)
+```
+
+```{r}
+# Calculate magnitude and theta for each depth
+
+# Depth 55
+data[["magnitude_depth_55"]] <- sqrt(data[["zonal_velocity_depth_55"]]^2 + data[["meridional_velocity_depth_55"]]^2)
+data[["theta_depth_55"]] <- atan2(data[["zonal_velocity_depth_55"]], data[["meridional_velocity_depth_55"]])
+
+# Depth 105
+data[["magnitude_depth_105"]] <- sqrt(data[["zonal_velocity_depth_105"]]^2 + data[["meridional_velocity_depth_105"]]^2)
+data[["theta_depth_105"]] <- atan2(data[["zonal_velocity_depth_105"]], data[["meridional_velocity_depth_105"]])
+
+# Depth 280
+data[["magnitude_depth_280"]] <- sqrt(data[["zonal_velocity_depth_280"]]^2 + data[["meridional_velocity_depth_280"]]^2)
+data[["theta_depth_280"]] <- atan2(data[["zonal_velocity_depth_280"]], data[["meridional_velocity_depth_280"]])
+
+#View(data)
+
+# Save updated dataset to CSV
+#write.csv(data, "/Users/josh/Documents/GitHub/capstone-scripps/data/Merged_CalCOFI/STD_CalCOFI_final", row.names = FALSE)
+```
+
+
+```{r}
+
+cal_data <- read.csv("/Users/josh/Documents/GitHub/capstone-scripps/data/Merged_CalCOFI/STD_CalCOFI_final")
+
+cal_data <- cal_data[, -c(1, 2)]
+
+# Changing dataset to only have present response data
+cal_data <- cal_data %>% 
+  filter(!is.na(a_scaled))
+
+set.seed(123)
+last_year <- max(cal_data$year)
+train_data <- cal_data %>% filter(year != last_year)
+test_data <- cal_data %>% filter(year == last_year)
+
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 10)
+
+fit_spatiotemporal <- sdmTMB(
+  a_scaled ~ magnitude_depth_55_std + temperature_depth_55_std + 
+    temperature_depth_280_std + salinity_depth_55_std, 
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"), 
+  spatial = "off", 
+  spatiotemporal = "iid",
+  extra_time = unique(test_data$season)
+)
+
+tidy(fit_spatiotemporal, conf.int = TRUE)
+sanity(fit_spatiotemporal)
+
+# Predictions on training and test data
+training_pred <- predict(fit_spatiotemporal, newdata = train_data, type = "response")
+training_pred$observed <- train_data$a_scaled
+
+test_pred <- predict(fit_spatiotemporal, newdata = test_data, type = "response")
+test_pred$observed <- test_data$a_scaled
+
+# Plotting the predictions
+p0 <- ggplot(training_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Train") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+p1 <- ggplot(test_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Test") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+gridExtra::grid.arrange(p0, p1)
+
+# Compute RMSE
+rmse_train <- rmse(training_pred$observed, training_pred$est)
+rmse_test <- rmse(test_pred$observed, test_pred$est)
+
+# Compute Range
+range_train <- range(train_data$a_scaled, na.rm = TRUE)
+range_test <- range(test_data$a_scaled, na.rm = TRUE)
+
+# Compute Standard Deviation
+sd_train <- sd(train_data$a_scaled, na.rm = TRUE)
+sd_test <- sd(test_data$a_scaled, na.rm = TRUE)
+
+# Assemble the table
+summary_table <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(rmse_train, rmse_test),
+  Range_Min = c(range_train[1], range_test[1]),
+  Range_Max = c(range_train[2], range_test[2]),
+  Std_Dev = c(sd_train, sd_test)
+)
+
+# Print the summary table
+print(summary_table)
+
+```
+
+look at the relationship between predictors and fin response and we need to formulate our splines with those relationships, maybe look into relatinships with other call types as well, try not un aggregating the call types, maybe try cross validation

@@ -1,0 +1,290 @@
+---
+title: "Fin Whale Modeling Template"
+output: html_document
+---
+
+## Load Packages and Data
+
+```{r, message = F, warning = F}
+# Load in the libraries
+library(tidyverse)
+library(sdmTMB)
+library(ggplot2)
+library(janitor)
+library(sp)
+library(readr)
+library(ggcorrplot)
+library(Metrics)
+library(naniar)
+library(tibble)
+library(rsample)
+library(caret)
+library(purrr)
+library(tune)
+
+# Read in the data
+cal_data <- read.csv("../../data/Merged_CalCOFI/STD_CalCOFI_final_merged_data_2012-2023.csv")
+```
+
+## Data Cleaning
+
+```{r}
+# Create a new `seasonal_category` column
+cal_data <- cal_data %>% 
+  mutate(seasonal_category = case_when(
+    month %in% c(12, 1, 2)  ~ "Winter",
+    month %in% c(3, 4, 5)   ~ "Spring",
+    month %in% c(6, 7, 8)   ~ "Summer",
+    month %in% c(9, 10, 11) ~ "Fall"
+  ))
+
+# Removing the first two columns
+cal_data <- cal_data[, -c(1, 2)]
+
+# Create fin whale response column
+cal_data <- cal_data %>%
+  mutate(fin_resp = x20hz_scaled + x40hz_scaled)
+
+# Changing dataset to only have present response data
+cal_data <- cal_data %>% 
+  filter(!is.na(fin_resp))
+```
+
+## Exploratory Data Analysis
+
+### Correlation Plot
+
+```{r}
+# Plotting Correlation
+# Define expected columns
+cols_to_use <- c("est_depth", 
+                 "temperature_depth_105", "temperature_depth_280", "temperature_depth_55", 
+                 "salinity_depth_105", "salinity_depth_280", "salinity_depth_55", 
+                 "meridional_velocity_depth_105", "meridional_velocity_depth_280", "meridional_velocity_depth_55", 
+                 "zonal_velocity_depth_105", "zonal_velocity_depth_280", "zonal_velocity_depth_55", 
+                 "vertical_velocity_depth_105", "vertical_velocity_depth_280", "vertical_velocity_55")
+
+# Keep only existing columns
+existing_cols <- intersect(cols_to_use, colnames(cal_data))
+cor_data <- cal_data[, existing_cols, drop = FALSE]
+
+# Compute correlation matrix (use complete.obs to skip missing data)
+cor_matrix <- cor(cor_data, use = "complete.obs")
+
+# Correlation plot
+ggcorrplot(cor_matrix, 
+           lab = TRUE, 
+           hc.order = TRUE, 
+           lab_size =2,
+           tl.cex = 5,
+           type = "lower", 
+           title = "Correlation Plot")
+```
+
+### Missing Data
+
+```{r}
+# Count how many missing values there are
+sum(is.na(cal_data))
+
+# Show the dimensions of the dataframe
+dim(cal_data)
+
+# Visualize missing data
+missing_data_plot <- naniar::vis_miss(cal_data)
+print(missing_data_plot)
+
+# Check across 
+gg_miss_fct(cal_data, fct = seasonal_category)
+```
+
+### Autocorrelation Detection
+
+```{r}
+acf(cal_data$fin_resp)
+
+pacf(cal_data$fin_resp)
+```
+
+## Splitting the Data
+
+```{r}
+# Split data into training and testing sets with most recent year as our testing set
+#since we have problems with 2023, remove that year for now
+
+bad_years <- c(2023)
+cal_data <- cal_data %>% filter(!year %in% bad_years)
+
+
+set.seed(123)
+last_year <- max(cal_data$year)
+train_data <- cal_data %>% filter(year != last_year)
+test_data <- cal_data %>% filter(year == last_year)
+```
+
+## Modeling
+
+### Forward Stepwise Selection
+
+```{r}
+# Define the initial model with only the intercept
+current_model <- lm(fin_resp ~ 1, data = train_data)
+
+# Define the full model with all predictors
+full_model <- lm(fin_resp ~ temperature_depth_105_std + temperature_depth_55_std + temperature_depth_280_std + salinity_depth_55_std + salinity_depth_105_std + magnitude_depth_55_std + magnitude_depth_105_std + theta_depth_55_std + theta_depth_105_std, 
+data = train_data)
+
+# Perform forward stepwise selection using the step() function
+best_stepwise_model <- step(current_model,
+                            scope = list(lower = current_model, upper = full_model),
+                            direction = "forward")
+# Figure out how to use stepwise selection for spatial temporal, this is just for linear regression
+# Use sdmTMB instead of lm
+```
+
+### Tweedie Model
+
+```{r}
+# TWEEDIE
+
+# Create mesh using training data
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 10)
+plot(mesh_train)
+
+# Fit spatiotemporal model
+fit_spatiotemporal <- sdmTMB(
+  fin_resp ~ s(magnitude_depth_55), 
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = tweedie(link = "log"), 
+  spatial = "off", 
+  spatiotemporal = "iid",
+  extra_time = unique(test_data$season)
+)
+
+# Extract coefficients and sanity check
+tidy(fit_spatiotemporal, conf.int = TRUE)
+sanity(fit_spatiotemporal)
+
+# Predictions on training and test data
+training_pred <- predict(fit_spatiotemporal, newdata = train_data)
+training_pred$observed <- train_data$fin_resp
+
+test_pred <- predict(fit_spatiotemporal, newdata = test_data)
+test_pred$observed <- test_data$fin_resp
+```
+
+```{r}
+# Plotting the predictions
+p0 <- ggplot(training_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Train") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+p1 <- ggplot(test_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Test") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+gridExtra::grid.arrange(p0, p1)
+
+# Compute RMSE
+rmse_train <- rmse(training_pred$observed, training_pred$est)
+rmse_test <- rmse(test_pred$observed, test_pred$est)
+
+# Compute Range
+range_train <- range(train_data$fin_resp, na.rm = TRUE)
+range_test <- range(test_data$fin_resp, na.rm = TRUE)
+
+# Compute Standard Deviation
+sd_train <- sd(train_data$fin_resp, na.rm = TRUE)
+sd_test <- sd(test_data$fin_resp, na.rm = TRUE)
+
+# Assemble the table
+summary_table <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(rmse_train, rmse_test),
+  Range_Min = c(range_train[1], range_test[1]),
+  Range_Max = c(range_train[2], range_test[2]),
+  Std_Dev = c(sd_train, sd_test)
+)
+
+# Print the summary table
+print(summary_table)
+```
+
+### Delta-Gamma Model
+
+```{r}
+# DELTA GAMMA
+
+# Create mesh using training data
+mesh_train <- make_mesh(train_data,
+                        xy_cols = c("X", "Y"),
+                        cutoff = 10)
+plot(mesh_train)
+
+# Fit spatiotemporal model
+fit_spatiotemporal <- sdmTMB(
+  fin_resp ~ magnitude_depth_55_std + temperature_depth_55_std + 
+    temperature_depth_280_std + salinity_depth_55_std, 
+  data = train_data, 
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"), 
+  spatial = "off", 
+  spatiotemporal = "iid",
+  extra_time = unique(test_data$season)
+)
+
+# Extract coefficients and sanity check
+tidy(fit_spatiotemporal, conf.int = TRUE)
+sanity(fit_spatiotemporal)
+
+# Predictions on training and test data
+training_pred <- predict(fit_spatiotemporal, newdata = train_data, type = "response")
+training_pred$observed <- train_data$fin_resp
+
+test_pred <- predict(fit_spatiotemporal, newdata = test_data, type = "response")
+test_pred$observed <- test_data$fin_resp
+
+# Plotting the predictions
+p0 <- ggplot(training_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Train") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+p1 <- ggplot(test_pred, aes(x = observed, y = est)) + 
+  geom_point() + 
+  ggtitle("Test") + 
+  geom_abline(intercept = 0, slope = 1, col = "red")
+
+gridExtra::grid.arrange(p0, p1)
+
+# Compute RMSE
+rmse_train <- rmse(training_pred$observed, training_pred$est)
+rmse_test <- rmse(test_pred$observed, test_pred$est)
+
+# Compute Range
+range_train <- range(train_data$fin_resp, na.rm = TRUE)
+range_test <- range(test_data$fin_resp, na.rm = TRUE)
+
+# Compute Standard Deviation
+sd_train <- sd(train_data$fin_resp, na.rm = TRUE)
+sd_test <- sd(test_data$fin_resp, na.rm = TRUE)
+
+# Assemble the table
+summary_table <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(rmse_train, rmse_test),
+  Range_Min = c(range_train[1], range_test[1]),
+  Range_Max = c(range_train[2], range_test[2]),
+  Std_Dev = c(sd_train, sd_test)
+)
+
+# Print the summary table
+print(summary_table)
+```

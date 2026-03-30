@@ -1,0 +1,81 @@
+---
+title: "Modeling Fin Whale 20 Hz Call Acoustic Presence Using Spatiotemporal General Linear Mixed Models and sdmTMB"
+output:
+  pdf_document: default
+  html_document: default
+---
+\begin{center}
+Joshua Charfauros \\
+
+Team Scripps \\
+
+06/05/2025
+\end{center}
+
+## Absract
+
+This project seeks to use spatiotemporal generalized linear mixed models (GLMMs) to predict acoustic presence of blue whales (A,B, and D calls) and fin whales (20 Hz and 40 Hz calls) in the Southern California Bight. To do this, me and my group combined many static environmental factors like temperature, water salinity, and ocean currents from UCSD's CASE-STSE database with acoustic whale call detections from California Cooperative Oceanic Fisheries Investigations (CalCOFI) at their numerous ocean stations off the coast of California. My primary role in this project was creating the model to predict fin whale 20 Hz calls. These calls are associated with fin whale reproduction and are most commonly produced in the fall and winter months. I explored into many model configurations using the sdmTMB R package which learns both spatial and temporal relations between my predictors and response. My best model was
+
+```{r, eval = FALSE, echo = TRUE}
+fit_spatiotemporal <- sdmTMB(
+  x20hz_scaled ~ temperature_depth_105_std +
+    temperature_depth_55_std + temperature_depth_280_std +
+    salinity_depth_55_std + salinity_depth_105_std +
+    magnitude_depth_55_std + magnitude_depth_105_std +
+    theta_depth_55_std + theta_depth_105_std,
+  data = train_data,
+  mesh = mesh_train,
+  time = "season",
+  family = delta_gamma(link1 = "logit", link2 = "log"),
+  spatial = "on",
+  spatiotemporal = "ar1",
+  extra_time = unique(test_data$season)
+)
+```
+
+This model uses 3 different temperature depths, 2 different salinity depths, 2 different magnitude depths, and 2 different theta depths to predict 20 Hz calls. I increment over seasons as my time step, this makes the most sense because whale calls differ season to season more than month to month or year to year. Here I use the spatiotemporal = ar1 or "autoregressive" hyperparameter which assumes each season is dependent upon previous ones but also allows for variation in strength of correlation. This is a variation of a random walk with differing weights. Here the test RMSE = 30.145 and Test Standard Deviation = 32.809 for a RMSE / STD DEV ratio of .918. Admittedly, this is not fantastic predictive ability, but it shows that this model is learning some relationship between the predictors and response.
+
+## Personal Contributions
+
+My main role was handling the 20 Hz fin whale call. This included data exploration, variable selection, model fitting and performance evaluation. Specifically:
+
+- Preprocessing : I helped to adapt and combine static environmental variables from UCSD's CASE-STSE data set with CalCOFI acoustic observations. Specifically was tasked with creation and calculation of magnitude and theta columns at several different ocean depths.
+
+- Exploratory Data Analysis : I conducted correlation analyses across predictors at depths of 55 m, 105 m, and 280 m to identify multicollinearity and avoid modeling comlpications. Assessed the functional form of predictor-response relationships to determine whether smooth or polynomial terms were appropriate for modeling. Examined seasonal trends in whale detections to identify patterns and seasonal variation in acoustic presence.
+
+- Variable Selection : As there is no built in stepwise variable selection in sdmTMB, I hard coded my own version with 255 combinations of non collinear predictors. Since each model takes about 15-20 minutes to fit and test, this variable selection took about 4 days of run time. This helped me to understand which predictors had significant effect on 20 hz calls.
+
+- Spatiotemporal Modeling : I implemented a series of Generalized Linear Mixed Models using sdmTMB. I tested many different combinations of spatial and temporal structures tuning hyperparameters like mesh shape, time increment, family, and spatiotemporal correlation structure to optimize model performance.
+
+- Model Interpretation - Once models were complete, interpreting them in an ecological context was crucial. While the 20 Hz model does not do terrifically to predict acoustic presence, taking a step back, we can understand that this is because we are missing much of the real-world story.
+
+## Key Findings
+
+- Best model : 
+
+  x20hz_scaled ~ temperature_depth_105_std + temperature_depth_55_std + temperature_depth_280_std + salinity_depth_55_std + salinity_depth_105_std + magnitude_depth_55_std + magnitude_depth_105_std + theta_depth_55_std + theta_depth_105_std, 
+
+  With a test RMSE = 30.145 and Test Standard Deviation = 32.809 for a RMSE / STD DEV ratio of .918.
+
+- Learned spatial relation : The model did decently to predict location of 20 Hz calls especially in the Fall and Winter months.
+
+- Incorrect predicted frequency : Because of the heavily zero-inflated data set, when calls were predicted, the scaled number of calls was consistently too low. The most the model would predict was ~50 when in reality max call numbers are closer to ~150. This because the model overfits towards 0.
+
+- Conclusion : It is difficult to predict fin whale 20 Hz calls based on only static ocean factors. As 20 Hz calls are linked to fin whale reproduction, there are likely many other social and ecological factors that influence the production of these calls. Only training a model on environmental datasets misses out on an important piece of the equation. To improve this modeling in the future, more comprehensive data would need to be obtained, things like locations of food, food availability, and migratory patterns would likely provide some of the needed information.
+
+
+## Supplemental Information
+
+Github repository contributions included:
+
+- Merged_CalCOFI/: contributed to combination of CASE-STSE dataset and CalCOFI acoustic detections. Environmental variables were grouped and averaged by CalCOFI cruise dates.
+
+- merged_std_data_05_13_25.csv : The final merged CASE-STSE and CalCOFI dataset for sdmTMB modeling. All variables are cleaned and standardized.
+
+- Stepwise-Selection.Rmd : Hard coded stepwise variable selection. This was used in place of a built in stepwise variable selection function.
+
+- 20 Hz Report/ : A folder with a full overview of all 20 Hz work. Includes 20_Hz_Report.rmd and a rendered version as a .pdf, and several other images and applicable materials for said report.
+
+- Final_Deliverable.Rmd : The whole team contributed a code chunk with their best performing model. I was responsible for the 20 Hz portion of this final deliverable for our advisor.
+
+- 20_hz_call/ : A folder containing all work related to the 20 Hz call. This includes 20_HZ.Rmd which has exploratory data analysis as well as model fitting, testing and interpretation. Also included is previously mentioned Stepwise-Selection.Rmd and supplementary images and materials.

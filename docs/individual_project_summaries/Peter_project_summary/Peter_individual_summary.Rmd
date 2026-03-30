@@ -1,0 +1,52 @@
+---
+title: "Peter_individual_summary"
+author: "Peter Xiong"
+date: "2025-06-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Abstract
+
+I would like to divide this project into the following sections: **Data extraction**, **Preprocessing**, **Exploratory Data Analysis**, **Modeling**. We fairly divided each part among everyone to complete. Therefore, all of us participated in the entire project. Next, I will introduce what I specifically did in this project.
+
+# Contributions
+
+## Data extraction
+
+In the beginning of the project, Wendy and I utilized the MATLAB code provided by Michaela to extract the environmental(CASE-STSE) data from the [SCRIPPS website](https://ecco.ucsd.edu/case_stse_results1.html). I modified the MATLAB code and extracted some of the environmental data(**Salinity**, **Zonal_velocity**, **Meridional_velocity**, **Vertical_velocity**) from 2009 to 2023. The MATLAB code is not stored in the GitHub.
+
+## Preprocessing
+
+In this part, I was tried to calculate the **monthly average** of each environmental variable. The script is located at:
+
+```         
+|- script/enviro_data_average/STSE_eviro_month_avg.R & temperature_average_code.R
+```
+
+## Exploratory Data Analysis
+
+I worked with Josh to create an **animation** to show how environmental variables change over time by using **ggOceanMaps** and **gganimate** packges.
+
+![](D:/Desktop/PSTAT197B/EDA_files/ocean_temp_animation.gif)
+
+## Modeling
+
+I primarily focused on building models for **D call**. I tried different combination of variables and model selections to find the best model and showed its results. The Rmd file is located at:
+
+```         
+|- script/modeling/d_call/d_call.Rmd
+```
+
+Also, I helped Justin to write the function of **prediction heatmap**, which is used to visualize the results of each model prediction. The function is showed in `d_call.Rmd` file.
+
+The prediction heatmap of D call's best model:
+
+![](D:/Desktop/PSTAT197B/poster/prediction_heatmap.png)
+
+# Summary
+
+My teammates and I did a really great job in this project. Everyone in this team is nice. I am very happy and thanksful for meeting such a wonderful group of partners and completed such a great project. In addition, I would like to thank Michaela for providing us with this project and Dr. Baracaldo for for her guidance.
